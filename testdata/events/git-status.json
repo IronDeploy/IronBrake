@@ -1,0 +1,13 @@
+{
+  "session_id": "sessao-exemplo-001",
+  "transcript_path": "/Users/user/.claude/projects/exemplo/transcript.jsonl",
+  "cwd": "/Users/user/Documents/IronDeploy",
+  "permission_mode": "default",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "git status",
+    "description": "Mostra o estado do repositório"
+  },
+  "tool_use_id": "toolu_exemplo_001"
+}

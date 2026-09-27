@@ -1,0 +1,11 @@
+# arquivos gerados que não vão para o repositório.
+
+# binário local (make build) e binários de release (make dist)
+/bin/
+/dist/
+
+# documentação interna do projeto; só estes vão para o repositório
+/doc/*
+!/doc/spec.md
+!/doc/known-issues.md
+!/doc/release.md

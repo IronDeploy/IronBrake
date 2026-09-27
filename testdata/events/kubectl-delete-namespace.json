@@ -1,0 +1,14 @@
+{
+  "session_id": "sessao-exemplo-004",
+  "transcript_path": "/Users/user/.claude/projects/exemplo/transcript.jsonl",
+  "cwd": "/Users/user/Documents/IronDeploy",
+  "permission_mode": "default",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "kubectl delete namespace prod",
+    "description": "Remove o namespace de produção",
+    "run_in_background": false
+  },
+  "tool_use_id": "toolu_exemplo_004"
+}

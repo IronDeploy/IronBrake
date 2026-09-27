@@ -1,0 +1,224 @@
+# Problemas conhecidos
+
+Tudo marcado como **verificado** foi reproduzido com o binário (`bin/iron
+hook`, evento montado à mão). Para reproduzir:
+
+```bash
+check() { jq -nc --arg c "$1" --arg d "${2:-$PWD}" \
+  '{tool_name:"Bash",cwd:$d,tool_input:{command:$c}}' | bin/iron hook; echo "exit=$?"; }
+check 'git push --force'    # exit=2
+```
+
+## 1. Comandos que escapam das regras (verificado em 2026-09-28)
+
+O `splitCommands` segue o bash de perto: aspas, `\` + quebra de linha,
+`$'...'`, `$(...)` e crases (inclusive entre aspas duplas), subshells `( )`,
+grupos `{ }`, `if/then/do/!`, atribuições `VAR=x`, prefixos (`sudo`, `env`,
+`time`, `nohup`, `timeout`, `nice`, `xargs`, `command`, `exec`...) e scripts
+em linha (`sh -c`, `bash -c`, `eval`, `watch`), com limite de profundidade.
+Nomes de programa não diferenciam maiúsculas (`GIT`, `Terraform`) e ignoram
+`.exe`.
+
+O que **ainda** sai com código 0:
+
+| Comando | Por que escapa |
+|---|---|
+| `F=--force; git push $F`, `git push "$(echo --force)"` | o valor só existe quando o shell roda (variável, saída de comando) |
+| `alias p="git push --force"; p` | alias e funções do shell |
+| `git -c remote.origin.push=+refs/heads/main push` | o force vem de uma configuração, não do comando |
+| `make deploy`, `./deploy.sh` | o comando está dentro de outro arquivo |
+| `python3 -c "os.system('git push --force')"` | outra linguagem executa o comando |
+| `ssh prod-host "terraform destroy"` | o comando roda em outra máquina (não é analisado) |
+
+Todos exigem esforço deliberado; a proteção é contra erros e loops, não
+contra um agente que tenta burlar (seção 10).
+
+## 2. Falsos negativos conhecidos das regras (verificado)
+
+Comandos destrutivos que hoje saem com **código 0**:
+
+| Categoria | Comando | Por que passa |
+|---|---|---|
+| terraform | `terraform state rm`, `import`, `taint`, `workspace delete` | sem regra |
+| terraform | `tofu ...`, `terragrunt ...` | só `terraform` é reconhecido |
+| git | `git checkout -- .`, `git restore .` | descartam alterações, mas não estão na regra |
+| git | `git branch -D main`, `git push origin :main`, `git push --delete` | apagam branch; fora do escopo (`--mirror` é bloqueado) |
+| kubernetes | `kubectl delete -f namespace.yaml` | o tipo está dentro do arquivo |
+| kubernetes | `kubectl delete pods -A -l app=x` | `-A`/`--all-namespaces` não é `--all` |
+| kubernetes | `helm uninstall app` | sem regra |
+| nuvem | `aws s3 rm s3://b --recursive`, `aws s3 rb s3://b --force` | não são `delete-*` nem `terminate-instances` |
+| nuvem | `az storage blob delete-batch` | só a palavra exata `delete` é reconhecida |
+| SQL | `psql -f drop.sql`, `mysql < drop.sql` | o SQL está num arquivo |
+| SQL | `DELETE FROM users WHERE 1=1` | tem `WHERE`, mas apaga tudo |
+| SQL | `DROP SCHEMA ... CASCADE` | fora da lista (DATABASE, TABLE, TRUNCATE, DELETE) |
+
+Qualquer regra também escapa por `sh -c`, prefixos e scripts (seção 1).
+Deny por ambiente (produção) está planejado para o próximo passo.
+
+## 3. O motivo do ask não aparece a tempo (limitação do Claude Code)
+
+Na extensão do VS Code:
+
+- a caixa de confirmação **não mostra** o `permissionDecisionReason` (a
+  documentação diz que é "shown to the user");
+- o `systemMessage` só aparece **depois** que o comando roda, como linhas
+  `PreToolUse:Bash says: ...`;
+- se você recusa, **nada** é mostrado.
+
+Pesquisado na documentação de hooks: `defer` só funciona com `claude -p`;
+`PermissionRequest` decide mas não mostra nada; `terminalSequence` é só
+notificação de terminal. Nenhum resolve.
+
+**Contorno atual:** todo ask abre a janela nativa do macOS com o motivo.
+**Continua sem solução fora do macOS** (Linux, Windows, SSH, nuvem): o
+fallback é o ask do Claude Code, com o motivo invisível na hora de decidir.
+
+## 4. Linha com plan e apply juntos é bloqueada (verificado)
+
+`terraform plan -out=novo.tfplan && terraform apply novo.tfplan` → deny
+("não consegui ler o plano salvo"), porque o plano ainda não existe quando o
+hook roda. É seguro, mas obriga a separar em dois comandos. A mensagem orienta
+isso.
+
+## 5. `cd` na mesma linha é bloqueado
+
+`cd infra && terraform apply tfplan` → deny, porque o Iron Brake não sabe com
+certeza qual arquivo será aplicado (`cd ~`, `cd -`, `cd $VAR`...). Só `cd`,
+`pushd` e `popd` são detectados; `(cd x; ...)` e outras formas de trocar de
+pasta não são. Alternativa aceita: `terraform -chdir=infra apply tfplan`.
+
+## 6. Depois de aprovar na janela, o Claude Code podia perguntar de novo (corrigido e verificado)
+
+Corrigido: ao aprovar na janela, o Iron Brake responde `permissionDecision:
+"allow"` explícito. Exceção proposital: se a linha tiver outros comandos
+(`terraform apply tfplan && rm -rf x`), fica "sem opinião", para o resto da
+linha não passar de carona — e aí o Claude Code ainda pode perguntar.
+
+## 7. Riscos residuais da janela nativa
+
+- **Timeout configurado abaixo de ~530 s:** se alguém definir `"timeout"`
+  menor no hook do `settings.json`, o Claude Code pode matar o hook enquanto a
+  janela espera — e hook que estoura o tempo **não bloqueia**: o comando
+  passa. `iron init` não define timeout (vale o padrão de 600 s). O `iron
+  doctor` ainda não verifica isso.
+- **Janela atrás de outras:** não confirmado se ela sempre vem para a frente.
+- **Agente com controle do computador** (computer use, permissão de
+  Acessibilidade) poderia, em tese, clicar em Executar.
+
+## 8. Teste intermitente do doctor (corrigido)
+
+`go test -count=1 ./...` falhava às vezes em `internal/doctor` com "o hook
+não respondeu em 1s": com a máquina ocupada, iniciar o script `sh` falso
+passava de 1 s. Corrigido: os casos normais usam 10 s, e só o caso que testa
+travamento usa 1 s. Depois disso, 5 rodadas completas sem falha.
+
+## 9. Limites da detecção de produção
+
+- **Só por nomes.** Se o cluster de produção se chama `cluster-a` e a conta
+  AWS `empresa`, nada indica produção: tudo vira ask. Declare os nomes em
+  `production_patterns`.
+- **Contexto de onde o hook roda:** as variáveis de ambiente e o kubeconfig
+  lidos são os do processo do hook (herdados do Claude Code). Um
+  `export AWS_PROFILE=prod` feito antes, no shell do agente, não é visto — a
+  não ser que esteja na mesma linha do comando.
+- **Workspace do terraform:** só é lido em `<cwd>/.terraform/environment`; com
+  `-chdir=outra/pasta`, o workspace daquela pasta não é lido (o nome da pasta
+  no `-chdir` conta, porque está no comando).
+- **O agente pode editar o `.iron/policy.yaml`** com a ferramenta Write (o
+  Iron Brake só vê Bash). Como o arquivo só soma, ele não consegue remover os
+  padrões embutidos; mas pode adicionar padrões que só geram mais bloqueios,
+  ou deixar o arquivo inválido (o que também só gera mais bloqueios).
+- **Falso positivo por palavra:** uma pasta ou recurso chamado `prod` que não
+  é produção vira deny. Como o arquivo só soma, não dá para remover `prod`.
+
+## 10. Limites da memória da sessão
+
+- **Conta tentativas, não execuções.** O `PreToolUse` roda antes do comando:
+  um apply recusado na janela, ou que falhou, conta igual. Contar só o que
+  rodou exigiria um hook `PostToolUse`.
+- **O agente pode apagar o estado** (`rm -rf ~/Library/Caches/ironbrake`) e
+  zerar os contadores. A proteção é contra loops por engano, não contra um
+  agente que tenta burlar de propósito.
+- **Evento sem `session_id`:** a memória não roda (não há onde guardar).
+- **Windows não testado:** a trava lá usa o arquivo aberto sem
+  compartilhamento; compila, mas nunca rodou num Windows.
+- **"Muito parecido" é limitado:** só espaços, aspas, barras invertidas e
+  maiúsculas. `terraform apply plan1` e `plan2` contam como comandos
+  diferentes.
+- **Hash de segredo curto:** o hash com sal impede tabelas prontas e liga o
+  hash a uma sessão só, mas quem tem o arquivo (que já é `0600`) e sabe o
+  formato do comando pode testar senhas fracas uma a uma.
+- **Concorrência testada com goroutines** (cada uma abre o arquivo por conta
+  própria, o que o `flock` trata como processos diferentes), não com vários
+  processos `iron` de verdade.
+
+## 11. Limites do log de auditoria
+
+- **Apagar o arquivo inteiro ou as últimas linhas não é detectado**: nenhuma
+  linha depois delas guardava o hash delas. Demonstrado em
+  `TestVerifyCannotDetectTruncatedEnd`.
+- **Alterar a última linha não é detectado**, pelo mesmo motivo.
+- **Quem altera uma linha e recalcula os `prev` seguintes deixa a corrente
+  íntegra de novo.** A corrente pega edição descuidada, não quem conhece o
+  formato (o agente roda com o seu usuário e pode escrever no arquivo).
+  Demonstrado em `TestVerifyCannotDetectRewrittenChain`.
+- Os três só se resolvem com um registro **fora da máquina** (fase 2: um
+  servidor que recebe periodicamente o hash da última linha).
+- **Falha ao gravar é silenciosa para você**: o aviso vai para o stderr, que o
+  Claude Code só mostra no deny. O `iron doctor` ainda não confere o log.
+- **O log cresce sem limite** (~180 bytes por comando); não há rotação.
+- **Endereços do terraform** podem conter dados em chaves de `for_each`
+  (ex.: `aws_iam_user.u["ana@empresa.com"]`).
+- **`session` é o `session_id` do Claude Code**, gravado como veio.
+
+## 12. Revisão de segurança de 2026-09-28 (corrigido)
+
+Falhas encontradas lendo todo o código e confirmadas com o binário (todas
+saíam com código 0 em produção); cada uma tem teste:
+
+| Falha | Correção |
+|---|---|
+| `\` + quebra de linha deslocava os argumentos (`kubectl delete \⏎ namespace prod`) | continuação de linha como no bash |
+| `do`, `then`, `if`, `!`, `{`, `(`, `time`, `sudo`, `env`, `VAR=x`, `nohup`, `timeout`, `xargs`... escondiam o programa | desembrulho dos prefixos e palavras do shell |
+| `$(...)` e crases (soltos ou entre aspas duplas) não eram analisados | o conteúdo é analisado como comando |
+| `sh -c`, `bash -c`, `eval`, `watch` | o script é analisado (até 8 níveis) |
+| `$'--force'` e `$'\x2d\x2dforce'` | aspas ANSI-C traduzidas |
+| `GIT push`, `Terraform destroy`, `kubectl.exe` | nome do programa sem diferenciar maiúsculas e sem `.exe` |
+| kubectl/aws: opção com valor fora da lista deslocava as posições | kubectl procura o verbo; aws trata toda opção longa como valorada, menos as booleanas |
+| SQL: `-- WHERE ...`, `/* */`, `WITH ... DELETE`, `EXPLAIN ANALYZE DELETE`; clientes `pgcli`, `mycli`, `duckdb`... | comentários removidos antes; CTE e EXPLAIN tratados; mais clientes |
+| `git push --mirror` | bloqueado como force push |
+| a janela usava o `osascript` do PATH: um falso aprovaria tudo | `/usr/bin/osascript` |
+| FIFO ou link para `/dev/zero` no `policy.yaml`, `.terraform/environment`, kubeconfig ou estado da sessão travava o hook, e o Claude Code liberava no timeout | leitura só de arquivo comum com limite de tamanho (`internal/safefile`) e prazo total de 560 s que responde deny |
+| release: tag com crase executava comando no `make dist` | versão vai ao shell como variável de ambiente; o fluxo valida `vX.Y.Z` |
+| cartão com centenas de recursos | lista limitada a 20 + "e mais N" |
+
+Decisões tomadas depois da revisão:
+
+| Ponto | Decisão |
+|---|---|
+| **Risco aceito:** um `terraform` falso num diretório do `PATH` muda o resultado do `terraform show` (o Iron Brake leria um plano inventado) | registrado, sem mudança por enquanto. Mitigação possível no futuro: caminho absoluto do terraform no `policy.yaml` |
+| Chaves de `for_each` vão no motivo enviado ao Claude e poderiam carregar texto de prompt injection | **corrigido:** o `tfplan.Summarize` saneia os endereços (chave com caractere fora de `A-Z a-z 0-9 _ . : / @ + -` ou com mais de 40 caracteres vira `["…"]`; caracteres de controle viram `?`; até 200 caracteres). Vale para o cartão, a janela e o log |
+| `timeout` do hook menor que o prazo do Iron Brake anula o deny por tempo | **corrigido:** o `iron doctor` confere (verificação 4/5): ausente (padrão 600 s) ou pelo menos 570 s |
+
+## 13. Limites da distribuição
+
+- **Windows compila, mas não foi testado**; o `install.sh` não roda no
+  Windows (instalação manual pelo `.exe`). Nomes como `terraform.exe` na
+  linha de comando não são reconhecidos pelas regras.
+- **O `SHA256SUMS` vem da mesma release que o binário:** pega download
+  corrompido, não release adulterada (ver [release.md](release.md)).
+- **O fluxo de release nunca rodou:** o projeto ainda não é um repositório
+  git nem está no GitHub; os testes nunca rodaram em Linux (só a compilação).
+- **Sem licença:** antes de publicar, é preciso escolher uma.
+
+## 14. Outros limites
+
+- **Plano trocado entre a leitura e o apply:** se outro processo reescrever o
+  arquivo do plano depois que o hook o leu, o terraform aplica o novo. Risco
+  baixo.
+- **`terraform show` precisa de `terraform init`** na pasta; sem isso, o plano
+  não é lido e o resultado é deny.
+- **Backends remotos (Terraform Cloud/HCP):** não testado.
+- **Endereços no cartão:** chaves de `for_each` aparecem no endereço (ex.:
+  `aws_iam_user.u["ana@empresa.com"]`). Não são atributos, mas podem conter
+  dados que você preferiria não ver na tela.

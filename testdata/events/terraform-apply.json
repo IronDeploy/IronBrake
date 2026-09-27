@@ -1,0 +1,14 @@
+{
+  "session_id": "sessao-exemplo-003",
+  "transcript_path": "/Users/user/.claude/projects/exemplo/transcript.jsonl",
+  "cwd": "/Users/user/Documents/IronDeploy/infra",
+  "permission_mode": "default",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "terraform apply",
+    "description": "Aplica as mudanças de infraestrutura",
+    "timeout": 120000
+  },
+  "tool_use_id": "toolu_exemplo_003"
+}

@@ -1,0 +1,64 @@
+# publicar uma release do Iron Brake quando uma tag de versão
+# (v1.2.3) é enviada: roda os testes, gera os 6 binários e o SHA256SUMS
+# (make dist) e cria a release no GitHub com esses arquivos.
+#
+# Segurança:
+#   - As ações são fixadas pelo SHA do commit (tag pode ser movida; SHA não).
+#   - Permissões mínimas: nada por padrão; só o job de release pode escrever
+#     no repositório, e só em "contents" (criar a release).
+#   - O job de release roda no ambiente "release", que deve exigir aprovação
+#     de uma pessoa (Settings → Environments → release → Required reviewers).
+#   - Sem cache do Go na release: um cache envenenado por outro fluxo não
+#     entra no binário publicado.
+
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: go vet ./...
+      - run: go test -count=1 ./...
+
+  release:
+    needs: test
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Conferir o formato da tag
+        run: |
+          if ! printf '%s' "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "tag fora do formato vX.Y.Z" >&2
+            exit 1
+          fi
+      - name: Gerar binários e SHA256SUMS
+        run: make dist VERSION="$GITHUB_REF_NAME"
+      - name: Criar a release
+        # O gh já vem instalado no runner: não precisa de ação de terceiros.
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

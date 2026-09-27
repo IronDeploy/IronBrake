@@ -1,0 +1,329 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.16.4",
+  "variables": {
+    "config_value": {
+      "value": "v1"
+    },
+    "greeting": {
+      "value": "hello"
+    },
+    "include_extra": {
+      "value": false
+    },
+    "include_marker": {
+      "value": true
+    },
+    "pet_keeper": {
+      "value": "a"
+    }
+  },
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "local_file.greeting",
+          "mode": "managed",
+          "type": "local_file",
+          "name": "greeting",
+          "provider_name": "registry.terraform.io/hashicorp/local",
+          "schema_version": 0,
+          "values": {
+            "content": "hello",
+            "content_base64": null,
+            "directory_permission": "0777",
+            "file_permission": "0777",
+            "filename": "greeting.txt",
+            "sensitive_content": null,
+            "source": null
+          },
+          "sensitive_values": {
+            "sensitive_content": true
+          }
+        },
+        {
+          "address": "null_resource.marker[0]",
+          "mode": "managed",
+          "type": "null_resource",
+          "name": "marker",
+          "index": 0,
+          "provider_name": "registry.terraform.io/hashicorp/null",
+          "schema_version": 0,
+          "values": {
+            "triggers": null
+          },
+          "sensitive_values": {}
+        },
+        {
+          "address": "random_pet.name",
+          "mode": "managed",
+          "type": "random_pet",
+          "name": "name",
+          "provider_name": "registry.terraform.io/hashicorp/random",
+          "schema_version": 0,
+          "values": {
+            "keepers": {
+              "k": "a"
+            },
+            "length": 2,
+            "prefix": null,
+            "separator": "-"
+          },
+          "sensitive_values": {
+            "keepers": {}
+          }
+        },
+        {
+          "address": "terraform_data.config",
+          "mode": "managed",
+          "type": "terraform_data",
+          "name": "config",
+          "provider_name": "terraform.io/builtin/terraform",
+          "schema_version": 0,
+          "values": {
+            "input": "v1",
+            "store": null,
+            "triggers_replace": null
+          },
+          "sensitive_values": {}
+        }
+      ]
+    }
+  },
+  "resource_changes": [
+    {
+      "address": "local_file.greeting",
+      "mode": "managed",
+      "type": "local_file",
+      "name": "greeting",
+      "provider_name": "registry.terraform.io/hashicorp/local",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "content": "hello",
+          "content_base64": null,
+          "directory_permission": "0777",
+          "file_permission": "0777",
+          "filename": "greeting.txt",
+          "sensitive_content": null,
+          "source": null
+        },
+        "after_unknown": {
+          "content_base64sha256": true,
+          "content_base64sha512": true,
+          "content_md5": true,
+          "content_sha1": true,
+          "content_sha256": true,
+          "content_sha512": true,
+          "id": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {
+          "sensitive_content": true
+        }
+      }
+    },
+    {
+      "address": "null_resource.marker[0]",
+      "mode": "managed",
+      "type": "null_resource",
+      "name": "marker",
+      "index": 0,
+      "provider_name": "registry.terraform.io/hashicorp/null",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "triggers": null
+        },
+        "after_unknown": {
+          "id": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {}
+      }
+    },
+    {
+      "address": "random_pet.name",
+      "mode": "managed",
+      "type": "random_pet",
+      "name": "name",
+      "provider_name": "registry.terraform.io/hashicorp/random",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "keepers": {
+            "k": "a"
+          },
+          "length": 2,
+          "prefix": null,
+          "separator": "-"
+        },
+        "after_unknown": {
+          "id": true,
+          "keepers": {}
+        },
+        "before_sensitive": false,
+        "after_sensitive": {
+          "keepers": {}
+        }
+      }
+    },
+    {
+      "address": "terraform_data.config",
+      "mode": "managed",
+      "type": "terraform_data",
+      "name": "config",
+      "provider_name": "terraform.io/builtin/terraform",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "input": "v1",
+          "store": null,
+          "triggers_replace": null
+        },
+        "after_unknown": {
+          "id": true,
+          "output": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {}
+      }
+    }
+  ],
+  "configuration": {
+    "provider_config": {
+      "local": {
+        "name": "local",
+        "full_name": "registry.terraform.io/hashicorp/local"
+      },
+      "null": {
+        "name": "null",
+        "full_name": "registry.terraform.io/hashicorp/null"
+      },
+      "random": {
+        "name": "random",
+        "full_name": "registry.terraform.io/hashicorp/random"
+      },
+      "terraform": {
+        "name": "terraform",
+        "full_name": "terraform.io/builtin/terraform"
+      }
+    },
+    "root_module": {
+      "resources": [
+        {
+          "address": "local_file.greeting",
+          "mode": "managed",
+          "type": "local_file",
+          "name": "greeting",
+          "provider_config_key": "local",
+          "expressions": {
+            "content": {
+              "references": [
+                "var.greeting"
+              ]
+            },
+            "filename": {
+              "constant_value": "greeting.txt"
+            }
+          },
+          "schema_version": 0
+        },
+        {
+          "address": "null_resource.marker",
+          "mode": "managed",
+          "type": "null_resource",
+          "name": "marker",
+          "provider_config_key": "null",
+          "schema_version": 0,
+          "count_expression": {
+            "references": [
+              "var.include_marker"
+            ]
+          }
+        },
+        {
+          "address": "random_id.extra",
+          "mode": "managed",
+          "type": "random_id",
+          "name": "extra",
+          "provider_config_key": "random",
+          "expressions": {
+            "byte_length": {
+              "constant_value": 4
+            }
+          },
+          "schema_version": 0,
+          "count_expression": {
+            "references": [
+              "var.include_extra"
+            ]
+          }
+        },
+        {
+          "address": "random_pet.name",
+          "mode": "managed",
+          "type": "random_pet",
+          "name": "name",
+          "provider_config_key": "random",
+          "expressions": {
+            "keepers": {
+              "references": [
+                "var.pet_keeper"
+              ]
+            }
+          },
+          "schema_version": 0
+        },
+        {
+          "address": "terraform_data.config",
+          "mode": "managed",
+          "type": "terraform_data",
+          "name": "config",
+          "provider_config_key": "terraform",
+          "expressions": {
+            "input": {
+              "references": [
+                "var.config_value"
+              ]
+            }
+          },
+          "schema_version": 0
+        }
+      ],
+      "variables": {
+        "config_value": {
+          "default": "v1"
+        },
+        "greeting": {
+          "default": "hello"
+        },
+        "include_extra": {
+          "default": false
+        },
+        "include_marker": {
+          "default": true
+        },
+        "pet_keeper": {
+          "default": "a"
+        }
+      }
+    }
+  },
+  "timestamp": "2026-09-25T01:46:48Z",
+  "applyable": true,
+  "complete": true,
+  "errored": false
+}

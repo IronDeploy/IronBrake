@@ -1,0 +1,12 @@
+{
+  "session_id": "sessao-exemplo-005",
+  "transcript_path": "/Users/user/.claude/projects/exemplo/transcript.jsonl",
+  "cwd": "/Users/user/Documents/IronDeploy",
+  "permission_mode": "default",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "README.md"
+  },
+  "tool_use_id": "toolu_exemplo_005"
+}
