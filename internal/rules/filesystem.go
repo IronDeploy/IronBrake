@@ -18,7 +18,6 @@ const (
 
 	findDeleteDanger = "find sem filtro de nome com -delete ou -exec rm apaga tudo sob o caminho, sem volta (adicione -name/-path, ou rode sem -delete para ver o que casaria)."
 	shredFileDanger  = "shred sobrescreve o arquivo para impedir recuperação."
-	rmForceDanger    = "rm -rf apaga uma árvore inteira de arquivos sem volta."
 )
 
 var (
