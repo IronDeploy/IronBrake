@@ -31,20 +31,19 @@ hook que aponta para um binário que sumiu **não bloqueia nada**.
    `scripts/install.sh` e o `README.md` usam; se o nome for outro, troque
    nos dois).
 2. Em **Settings → Environments**, crie o ambiente `release` com
-   **Required reviewers** (você). O job de release só roda depois da sua
-   aprovação.
+   **Required reviewers**. O job de release só roda depois da aprovação.
 3. Em **Settings → Rules → Rulesets**, crie uma regra para **tags** `v*` que
    só você (ou um time) pode criar, e uma para a branch principal exigindo
    pull request. Proteja `.github/` com um `CODEOWNERS`.
 4. Publique a versão:
 
    ```bash
-   git tag v0.1.0
-   git push origin v0.1.0
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
    ```
 
    O fluxo `.github/workflows/release.yml` roda os testes, gera o `dist/` e,
-   depois da sua aprovação, cria a release com todos os arquivos.
+   depois da aprovação, cria a release com todos os arquivos.
 
 ## Segurança do fluxo
 

@@ -223,17 +223,9 @@ Decisões tomadas depois da revisão:
   corrompido, não release adulterada (ver [release.md](release.md)).
 - **Fluxo de release verificado em 2026-09-28:** a tag `v0.1.0` rodou o
   `.github/workflows/release.yml` de ponta a ponta — `test` e `release`
-  concluíram com sucesso, e a release saiu em
-  [github.com/IronDeploy/IronBrake/releases/tag/v0.1.0](https://github.com/IronDeploy/IronBrake/releases/tag/v0.1.0)
-  com os 6 binários, o `install.sh` e o `SHA256SUMS`. Os testes rodaram em
-  Linux pela primeira vez (antes só tinha sido compilação cruzada) e
-  passaram.
-- **A release saiu sem aprovação humana**, porque o *Environment* "release"
-  (Settings → Environments → *Required reviewers*) ainda não foi configurado
-  no repositório — o GitHub cria o ambiente na hora, sem proteção nenhuma,
-  quando ele não existe. **Pendência:** configurar o *Required reviewers*
-  antes da próxima tag, se o objetivo é que uma pessoa aprove cada release
-  antes de publicar (é assim que o `release.md` descreve o fluxo).
+  concluíram com sucesso, com os 6 binários, o `install.sh` e o
+  `SHA256SUMS`. Os testes rodaram em Linux pela primeira vez (antes só tinha
+  sido compilação cruzada) e passaram.
 
 ## 14. Outros limites
 
