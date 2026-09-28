@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/IronDeploy/IronBrake/internal/audit"
@@ -15,6 +17,7 @@ import (
 	"github.com/IronDeploy/IronBrake/internal/rules"
 	"github.com/IronDeploy/IronBrake/internal/runenv"
 	"github.com/IronDeploy/IronBrake/internal/safefile"
+	"github.com/IronDeploy/IronBrake/internal/scan"
 	"github.com/IronDeploy/IronBrake/internal/session"
 	"github.com/IronDeploy/IronBrake/internal/setup"
 	"github.com/IronDeploy/IronBrake/internal/tfplan"
@@ -35,7 +38,9 @@ const usage = `uso: iron <subcomando>
 
   hook          roda como hook PreToolUse do Claude Code (lê o evento pelo stdin)
   init          instala o hook em .claude/settings.json da pasta atual
+  init --harden grava também regras deny de leitura das credenciais (Iron Shield)
   doctor        verifica se o hook desta pasta está mesmo protegendo
+  scan          raio-X das credenciais ao alcance do agente (Iron Shield, só leitura)
   audit verify  confere se a corrente do log de auditoria (~/.iron/audit.log) está íntegra
   version       mostra a versão`
 
@@ -52,9 +57,11 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			deadline: hook.Deadline,
 		})
 	case "init":
-		return initHere(stdout, stderr)
+		return initHere(args[1:], stdout, stderr)
 	case "doctor":
 		return doctorHere(stdout, stderr)
+	case "scan":
+		return runScan(stdout, stderr)
 	case "audit":
 		return runAudit(args[1:], stdout, stderr)
 	case "version":
@@ -277,7 +284,8 @@ func runAudit(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-func initHere(stdout, stderr io.Writer) int {
+func initHere(args []string, stdout, stderr io.Writer) int {
+	harden := slices.Contains(args, "--harden")
 	dir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(stderr, "iron: %v\n", err)
@@ -288,10 +296,10 @@ func initHere(stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "iron: %v\n", err)
 		return 1
 	}
-	return runInit(dir, exePath, stdout, stderr)
+	return runInit(dir, exePath, harden, stdout, stderr)
 }
 
-func runInit(dir, exePath string, stdout, stderr io.Writer) int {
+func runInit(dir, exePath string, harden bool, stdout, stderr io.Writer) int {
 	settingsPath := setup.SettingsPath(dir)
 
 	changed, err := setup.InstallHook(settingsPath, exePath)
@@ -305,7 +313,66 @@ func runInit(dir, exePath string, stdout, stderr io.Writer) int {
 	} else {
 		fmt.Fprintf(stdout, "iron: o hook já estava instalado em %s\n", settingsPath)
 	}
+
+	if harden {
+		added, err := setup.Harden(settingsPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "iron: %v\n", err)
+			return 1
+		}
+		if len(added) > 0 {
+			fmt.Fprintf(stdout, "iron: %d regra(s) deny de leitura de credenciais gravada(s) (Iron Shield)\n", len(added))
+		} else {
+			fmt.Fprintln(stdout, "iron: as regras deny de credenciais já estavam no lugar")
+		}
+	}
 	return 0
+}
+
+// runScan roda o Iron Shield: raio-X de credenciais, só leitura e sem rede.
+func runScan(stdout, stderr io.Writer) int {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(stderr, "iron: não consegui achar o home: %v\n", err)
+		return 1
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(stderr, "iron: %v\n", err)
+		return 1
+	}
+
+	fs := scan.Filesystem{
+		Home: home,
+		Cwd:  cwd,
+		Read: func(path string) ([]byte, error) { return safefile.Read(path, 1<<20) },
+		List: func(dir string) ([]string, error) {
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				return nil, err
+			}
+			names := make([]string, 0, len(entries))
+			for _, e := range entries {
+				names = append(names, e.Name())
+			}
+			return names, nil
+		},
+	}
+
+	findings := scan.Scan(fs, envMap(os.Environ()))
+	fmt.Fprint(stdout, scan.Report(findings))
+	return 0
+}
+
+// envMap transforma os.Environ() ("NOME=valor") em mapa nome→valor.
+func envMap(environ []string) map[string]string {
+	m := make(map[string]string, len(environ))
+	for _, kv := range environ {
+		if name, value, ok := strings.Cut(kv, "="); ok {
+			m[name] = value
+		}
+	}
+	return m
 }
 
 func doctorHere(stdout, stderr io.Writer) int {

@@ -108,6 +108,33 @@ partir de "Iron Brake:" é do Iron Brake.) O Claude recebe esse motivo e muda
 de estratégia (em geral, propõe um push
 normal ou pede que você mesmo rode o comando).
 
+## Iron Shield: o que o agente enxerga
+
+O freio (Iron Brake) barra a ação; o **Iron Shield** ataca a causa — a
+credencial ao alcance do agente. Dois comandos:
+
+```bash
+iron scan            # raio-X das credenciais que o agente alcançaria (só leitura)
+iron init --harden   # instala o hook E bloqueia a leitura desses lugares
+```
+
+O `iron scan` **nunca lê nem imprime o valor de um segredo** — só tipo, local e
+gravidade. Ele avalia: variáveis de ambiente, arquivos `.env`, perfis do
+`~/.aws`, chaves em `~/.ssh`, `~/.kube/config`, state e token do Terraform,
+`.npmrc`, credencial do Docker, token do `gh` e token embutido na URL de remote
+git. Exemplo:
+
+```
+🔴 CRÍTICO
+   • AWS · ~/.aws/credentials [perfil default] — perfil AWS com chave de longa duração
+🟠 ALTO
+   • .env · ~/projeto/.env — segredo em texto puro no arquivo (ex.: GITHUB_TOKEN)
+```
+
+O `iron init --harden` grava regras `deny` de leitura (`Read(~/.aws/**)`,
+`Read(**/.env)`, …) no `.claude/settings.json`, tirando as credenciais do
+caminho do agente. Detalhes e tabela completa em [doc/iron-shield.md](doc/iron-shield.md).
+
 ## Limites (leia antes de confiar)
 
 - **Só enxerga comandos de terminal** (a ferramenta Bash do Claude Code).

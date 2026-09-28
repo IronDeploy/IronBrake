@@ -442,7 +442,7 @@ func TestRunInit(t *testing.T) {
 	t.Run("primeira vez instala", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 
-		code := runInit(dir, testExe, &stdout, &stderr)
+		code := runInit(dir, testExe, false, &stdout, &stderr)
 
 		if code != 0 {
 			t.Fatalf("código de saída: esperava 0, obtive %d (stderr=%q)", code, stderr.String())
@@ -462,7 +462,7 @@ func TestRunInit(t *testing.T) {
 	t.Run("segunda vez avisa que já estava", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 
-		code := runInit(dir, testExe, &stdout, &stderr)
+		code := runInit(dir, testExe, false, &stdout, &stderr)
 
 		if code != 0 {
 			t.Fatalf("código de saída: esperava 0, obtive %d (stderr=%q)", code, stderr.String())
@@ -471,6 +471,30 @@ func TestRunInit(t *testing.T) {
 			t.Errorf("stdout deveria dizer que já estava instalado: %q", stdout.String())
 		}
 	})
+}
+
+func TestRunInitHardenWritesDenyRules(t *testing.T) {
+	dir := t.TempDir()
+	settings := filepath.Join(dir, ".claude", "settings.json")
+	var stdout, stderr bytes.Buffer
+
+	code := runInit(dir, testExe, true, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("código de saída: esperava 0, obtive %d (stderr=%q)", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "credenciais") {
+		t.Errorf("stdout deveria mencionar as regras de credenciais: %q", stdout.String())
+	}
+	data, err := os.ReadFile(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{"Read(~/.aws/**)", "Read(~/.ssh/**)", "Read(**/.env)"} {
+		if !strings.Contains(string(data), rule) {
+			t.Errorf("settings.json deveria conter a regra %q:\n%s", rule, data)
+		}
+	}
 }
 
 func TestRunInitInvalidSettingsFailsWithoutTouchingFile(t *testing.T) {
@@ -485,7 +509,7 @@ func TestRunInitInvalidSettingsFailsWithoutTouchingFile(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	code := runInit(dir, testExe, &stdout, &stderr)
+	code := runInit(dir, testExe, false, &stdout, &stderr)
 
 	if code == 0 {
 		t.Error("esperava um código de saída diferente de 0")
