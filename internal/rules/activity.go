@@ -7,7 +7,7 @@ import (
 
 // infraPrograms mexem em infraestrutura, assim como clientes SQL e git push.
 var infraPrograms = []string{
-	"terraform", "tofu", "terragrunt", "kubectl", "helm", "aws", "az", "gcloud",
+	"terraform", "tofu", "terragrunt", "kubectl", "helm", "aws", "az", "gcloud", "gsutil",
 }
 
 // Normalize devolve a forma canônica da linha, para comparar repetições.

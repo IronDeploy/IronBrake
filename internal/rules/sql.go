@@ -8,7 +8,7 @@ import (
 	"github.com/IronDeploy/IronBrake/internal/hook"
 )
 
-const sqlDestructiveDanger = "SQL destrutivo (DROP DATABASE, DROP TABLE, TRUNCATE ou DELETE sem WHERE)."
+const sqlDestructiveDanger = "SQL destrutivo (DROP DATABASE/SCHEMA/TABLE, TRUNCATE ou DELETE sem WHERE)."
 
 // Sem um cliente SQL na linha, SQL é só texto (grep, mensagem de commit).
 var sqlClients = []string{
@@ -28,12 +28,83 @@ func (sqlRule) Check(commands [][]string, env Env) (hook.Decision, string) {
 	if !callsSQLClient(commands) {
 		return hook.Allow, ""
 	}
+	// SQL escrito na própria linha (-c, heredoc, echo ... | psql).
 	for _, text := range sqlCandidates(commands) {
 		if hasDestructiveSQL(text) {
 			return decideByEnvironment(sqlDestructiveDanger, commands, env)
 		}
 	}
+	// SQL num arquivo: psql -f arquivo.sql, ou qualquer cliente com < arquivo.sql.
+	unreadable := false
+	for _, tokens := range commands {
+		for _, path := range sqlFileTargets(tokens) {
+			if isUnreadableTarget(path) {
+				unreadable = true
+				continue
+			}
+			data, ok := env.readTargetFile(path)
+			if !ok {
+				unreadable = true
+				continue
+			}
+			if hasDestructiveSQL(string(data)) {
+				return decideByEnvironment(sqlDestructiveDanger, commands, env)
+			}
+		}
+	}
+	if unreadable {
+		return decideUnreadableTarget("um arquivo SQL (-f ou < remoto, stdin ou ilegível)", commands, env)
+	}
 	return hook.Allow, ""
+}
+
+// psqlFamily aceita -f/--file como caminho de script (no mysql, -f é --force).
+var psqlFamily = set("psql", "pgcli")
+
+// sqlFileTargets: arquivos que o comando manda o cliente executar. -f/--file só
+// vale no psql; a redireção de entrada (< arquivo) vale para qualquer cliente.
+func sqlFileTargets(tokens []string) []string {
+	if len(tokens) == 0 {
+		return nil
+	}
+	var targets []string
+	psql := psqlFamily[programName(tokens[0])]
+	for i := 1; i < len(tokens); i++ {
+		t := tokens[i]
+		switch {
+		case psql && (t == "-f" || t == "--file"):
+			if i+1 < len(tokens) {
+				targets = append(targets, tokens[i+1])
+				i++
+			}
+		case psql && strings.HasPrefix(t, "-f="):
+			targets = append(targets, strings.TrimPrefix(t, "-f="))
+		case psql && strings.HasPrefix(t, "--file="):
+			targets = append(targets, strings.TrimPrefix(t, "--file="))
+		default:
+			if target, ok := inputRedirectTarget(t); ok {
+				if target == "" && i+1 < len(tokens) {
+					target = tokens[i+1]
+					i++
+				}
+				targets = append(targets, target)
+			}
+		}
+	}
+	return targets
+}
+
+// inputRedirectTarget reconhece < arquivo e 0< arquivo (colado ou solto).
+// Heredoc (<<EOF) e here-string (<<<) não são arquivo e ficam de fora.
+func inputRedirectTarget(tok string) (target string, ok bool) {
+	s := tok
+	for len(s) > 0 && s[0] >= '0' && s[0] <= '9' { // descritor: 0<
+		s = s[1:]
+	}
+	if !strings.HasPrefix(s, "<") || strings.HasPrefix(s, "<<") {
+		return "", false
+	}
+	return strings.TrimPrefix(s, "<"), true
 }
 
 // callsSQLClient olha todos os tokens, para pegar docker exec db psql.
@@ -80,7 +151,7 @@ func hasDestructiveSQL(text string) bool {
 		}
 		switch words[0] {
 		case "DROP":
-			if len(words) > 1 && (words[1] == "DATABASE" || words[1] == "TABLE") {
+			if len(words) > 1 && (words[1] == "DATABASE" || words[1] == "SCHEMA" || words[1] == "TABLE") {
 				return true
 			}
 		case "TRUNCATE":

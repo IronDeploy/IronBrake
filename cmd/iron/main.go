@@ -218,6 +218,8 @@ func loadEnv(cwd string) rules.Env {
 		Policy:      p,
 		Context:     runenv.Collect(cwd, os.Getenv, readContextFile),
 		PolicyError: err != nil,
+		Cwd:         cwd,
+		ReadFile:    readContextFile,
 	}
 }
 

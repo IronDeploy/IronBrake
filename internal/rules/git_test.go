@@ -70,6 +70,28 @@ func TestGitForcePush(t *testing.T) {
 	}
 }
 
+func TestGitPushDelete(t *testing.T) {
+	runRuleCases(t, gitPushDelete, []ruleCase{
+		// Branch protegida: deny em qualquer ambiente.
+		{`git push origin :main`, hook.Deny, hook.Deny},
+		{`git push origin :refs/heads/master`, hook.Deny, hook.Deny},
+		{`git push --delete origin main`, hook.Deny, hook.Deny},
+		{`git push -d origin production`, hook.Deny, hook.Deny},
+		{`git push origin --delete develop`, hook.Deny, hook.Deny},
+
+		// Outra branch: ask (apagar a remota errada também custa).
+		{`git push origin :feature-x`, hook.Ask, hook.Ask},
+		{`git push --delete origin old-feature`, hook.Ask, hook.Ask},
+
+		// Push normal e afins: allow.
+		{`git push origin main`, hook.Allow, hook.Allow},
+		{`git push origin feature`, hook.Allow, hook.Allow},
+		{`git push -u origin feature`, hook.Allow, hook.Allow},
+		{`git status`, hook.Allow, hook.Allow},
+		{`echo git push origin :main`, hook.Allow, hook.Allow},
+	})
+}
+
 func TestGitForcePushReasonDoesNotLeakCommand(t *testing.T) {
 	commands := []string{
 		`git push https://user:s3cr3t-token@github.com/org/repo.git --force`,
@@ -101,13 +123,48 @@ func TestGitDiscard(t *testing.T) {
 		{`git clean --force -d`, hook.Ask, hook.Deny},
 		{`git clean -f`, hook.Ask, hook.Deny},
 
+		// Apagar branch/tag sem merge, e destruir a rede de recuperação.
+		{`git branch -D feature`, hook.Ask, hook.Deny},
+		{`git branch --delete --force feature`, hook.Ask, hook.Deny},
+		{`git branch -Df feature`, hook.Ask, hook.Deny},
+		{`git tag -d v1.0.0`, hook.Ask, hook.Deny},
+		{`git tag --delete v1.0.0`, hook.Ask, hook.Deny},
+		{`git stash drop`, hook.Ask, hook.Deny},
+		{`git stash clear`, hook.Ask, hook.Deny},
+		{`git reflog expire --expire=now --all`, hook.Ask, hook.Deny},
+		{`git gc --prune=now`, hook.Ask, hook.Deny},
+		{`git gc --prune=all`, hook.Ask, hook.Deny},
+		{`git filter-branch --tree-filter 'rm -f senha' HEAD`, hook.Ask, hook.Deny},
+		{`git filter-repo --path secrets --invert-paths`, hook.Ask, hook.Deny},
+		{`git update-ref -d refs/heads/feature`, hook.Ask, hook.Deny},
+
+		// restore/checkout que descartam o diretório de trabalho.
+		{`git restore .`, hook.Ask, hook.Deny},
+		{`git restore src/app.go`, hook.Ask, hook.Deny},
+		{`git restore --staged --worktree arquivo`, hook.Ask, hook.Deny},
+		{`git checkout .`, hook.Ask, hook.Deny},
+		{`git checkout -- src/app.go`, hook.Ask, hook.Deny},
+
 		// Parecidos e inofensivos: allow em qualquer ambiente.
 		{`git reset --soft HEAD~1`, hook.Allow, hook.Allow},
 		{`git reset HEAD arquivo.txt`, hook.Allow, hook.Allow},
 		{`git reset --mixed`, hook.Allow, hook.Allow},
 		{`git clean -n`, hook.Allow, hook.Allow},
 		{`git clean -nd`, hook.Allow, hook.Allow},
-		{`git clean -fdn`, hook.Allow, hook.Allow}, // -n (dry run) só mostra, não apaga
+		{`git clean -fdn`, hook.Allow, hook.Allow},        // -n (dry run) só mostra, não apaga
+		{`git branch -d feature`, hook.Allow, hook.Allow}, // -d sem force recusa branch não mergeada
+		{`git branch feature`, hook.Allow, hook.Allow},
+		{`git branch -a`, hook.Allow, hook.Allow},
+		{`git tag v1.0.0`, hook.Allow, hook.Allow},
+		{`git stash`, hook.Allow, hook.Allow},
+		{`git stash pop`, hook.Allow, hook.Allow},
+		{`git stash list`, hook.Allow, hook.Allow},
+		{`git gc`, hook.Allow, hook.Allow},
+		{`git gc --prune=never`, hook.Allow, hook.Allow},
+		{`git reflog`, hook.Allow, hook.Allow},
+		{`git restore --staged arquivo`, hook.Allow, hook.Allow}, // só tira do stage
+		{`git checkout main`, hook.Allow, hook.Allow},
+		{`git checkout -b nova-feature`, hook.Allow, hook.Allow},
 		{`git status`, hook.Allow, hook.Allow},
 		{`git commit -m "git reset --hard"`, hook.Allow, hook.Allow},
 		{`echo git clean -fd`, hook.Allow, hook.Allow},

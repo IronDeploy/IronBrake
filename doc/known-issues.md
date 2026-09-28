@@ -35,25 +35,39 @@ contra um agente que tenta burlar (seção 10).
 
 ## 2. Falsos negativos conhecidos das regras (verificado)
 
-Comandos destrutivos que hoje saem com **código 0**:
+A cobertura foi ampliada em 2026-09-28. **Passaram a ser tratados** (deny em
+produção, ask fora, salvo os catastróficos que são deny sempre): filesystem
+(`rm -rf /`, `dd`, `mkfs`, `wipefs`, `shred`, `> /dev/...`, `chmod/chown -R` em
+sistema, `find -delete`), `curl|sh` e `curl -X DELETE`, contêineres (docker/
+podman prune, `volume rm`, `rm -f`, `compose down -v`), sistema (`shutdown`,
+`systemctl stop`, `crontab -r`, firewall), publicação de pacote (`npm publish`
+etc.), `terraform state rm`/`taint`/`workspace delete`/`force-unlock` (e `tofu`),
+git (`branch -D`, `tag -d`, `reflog expire`, `gc --prune=now`, `filter-branch`,
+`restore`/`checkout` de descarte, `push :branch`/`--delete` — branch protegida é
+deny), kubectl (`delete pvc/pv`, `scale --replicas=0`, `replace --force`), helm
+(`uninstall`, `rollback`), nuvem em massa (`s3 rm --recursive`, `s3 rb --force`,
+`gcloud/gsutil storage rm`, `az ... delete-*`/`purge`), SQL (`DROP SCHEMA`).
+
+Também passou a **ler o arquivo apontado** pelo comando: `kubectl delete -f x.yaml`
+(procura `kind: Namespace`/`PersistentVolumeClaim`/`PersistentVolume`) e
+`psql -f drop.sql` / `mysql < drop.sql` (roda a análise de SQL no conteúdo).
+Alvo que não dá para ler (URL remota, stdin `-`, kustomize `-k`, arquivo
+inexistente): allow fora de produção, ask em produção.
+
+O que **ainda** sai com **código 0**:
 
 | Categoria | Comando | Por que passa |
 |---|---|---|
-| terraform | `terraform state rm`, `import`, `taint`, `workspace delete` | sem regra |
-| terraform | `tofu ...`, `terragrunt ...` | só `terraform` é reconhecido |
-| git | `git checkout -- .`, `git restore .` | descartam alterações, mas não estão na regra |
-| git | `git branch -D main`, `git push origin :main`, `git push --delete` | apagam branch; fora do escopo (`--mirror` é bloqueado) |
-| kubernetes | `kubectl delete -f namespace.yaml` | o tipo está dentro do arquivo |
+| terraform | `terraform import`; `terragrunt ...` | `import` sem regra; só `terraform` e `tofu` são reconhecidos |
 | kubernetes | `kubectl delete pods -A -l app=x` | `-A`/`--all-namespaces` não é `--all` |
-| kubernetes | `helm uninstall app` | sem regra |
-| nuvem | `aws s3 rm s3://b --recursive`, `aws s3 rb s3://b --force` | não são `delete-*` nem `terminate-instances` |
-| nuvem | `az storage blob delete-batch` | só a palavra exata `delete` é reconhecida |
-| SQL | `psql -f drop.sql`, `mysql < drop.sql` | o SQL está num arquivo |
+| kubernetes | `kubectl delete -f x.yaml` com `kind` fora da lista (ex.: `Deployment`) | só Namespace/PVC/PV são tratados como perigosos |
 | SQL | `DELETE FROM users WHERE 1=1` | tem `WHERE`, mas apaga tudo |
-| SQL | `DROP SCHEMA ... CASCADE` | fora da lista (DATABASE, TABLE, TRUNCATE, DELETE) |
+| arquivos | `rm -rf` em caminho absoluto fora da lista crítica (`/data/prod`) | não é catastrófico universal; cai no ambiente só se casar com `production_patterns` |
+| nuvem | exclusão via SDK ou HTTP direto (sem a CLI) | não aparece como comando de CLI reconhecido |
 
-Qualquer regra também escapa por `sh -c`, prefixos e scripts (seção 1).
-Deny por ambiente (produção) está planejado para o próximo passo.
+Qualquer regra também escapa por variável no lugar do comando e por scripts
+(seção 1). Prefixos (`sudo`, `env`, `sh -c`, `eval`...) **não** escapam: são
+desmontados (seção 12).
 
 ## 3. O motivo do ask não aparece a tempo (limitação do Claude Code)
 

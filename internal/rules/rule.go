@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/IronDeploy/IronBrake/internal/hook"
@@ -14,6 +15,26 @@ type Env struct {
 	Policy      policy.Policy
 	Context     []string // de runenv.Collect
 	PolicyError bool     // policy.yaml com erro: tudo é produção e crítico
+
+	Cwd      string                            // pasta do comando, para resolver caminhos relativos
+	ReadFile func(path string) ([]byte, error) // lê um arquivo local (safefile); nil = sem leitura
+}
+
+// readTargetFile lê um arquivo apontado por um comando (kubectl delete -f,
+// psql -f). Devolve ok=false quando não dá para ler (sem leitor, remoto,
+// stdin, diretório, arquivo inexistente): aí a decisão fica com o ambiente.
+func (e Env) readTargetFile(path string) (data []byte, ok bool) {
+	if e.ReadFile == nil || path == "" {
+		return nil, false
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(e.Cwd, path)
+	}
+	data, err := e.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
 }
 
 // isProduction olha o contexto e todos os comandos da linha
@@ -92,6 +113,20 @@ func decideByEnvironment(danger string, commands [][]string, env Env) (hook.Deci
 		reason += policyErrorNote
 	}
 	return hook.Deny, reason
+}
+
+// decideUnreadableTarget vale quando o alvo destrutivo está num arquivo que o
+// Iron Brake não conseguiu ver (remoto, stdin, kustomize, inexistente): em
+// produção pede confirmação; fora dela, libera (o conteúdo pode ser inofensivo).
+func decideUnreadableTarget(what string, commands [][]string, env Env) (hook.Decision, string) {
+	if !env.isProduction(commands) {
+		return hook.Allow, ""
+	}
+	reason := "Iron Brake: não consegui ver o conteúdo de " + what + " em produção; confirme antes de executar."
+	if env.PolicyError {
+		reason += policyErrorNote
+	}
+	return hook.Ask, reason
 }
 
 // Verdict é a decisão, o motivo e a regra que decidiu (vazia no allow).

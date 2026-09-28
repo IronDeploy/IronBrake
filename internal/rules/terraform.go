@@ -15,9 +15,17 @@ const (
 	applyAfterCdReason     = "Iron Brake: terraform apply depois de cd na mesma linha bloqueado: não dá para saber qual plano será aplicado. use terraform -chdir=PASTA apply tfplan."
 	criticalInProdReason   = "Iron Brake: bloqueado: o plano apaga ou substitui recurso crítico em produção. peça ao usuário para executar."
 	destroyDanger          = "terraform destroy apaga todos os recursos do state."
+
+	stateRmDanger      = "terraform state rm tira o recurso do state sem destruí-lo de verdade: o próximo apply pode recriá-lo ou duplicá-lo."
+	taintDanger        = "terraform taint força a destruição e a recriação do recurso no próximo apply."
+	workspaceDelDanger = "terraform workspace delete apaga o workspace e o state associado a ele."
+	forceUnlockDanger  = "terraform force-unlock remove o lock do state: com outro apply em andamento, o state pode corromper."
 )
 
-var terraformDestroy = dangerRule{name: "terraform-destroy", match: matchTerraformDestroy}
+var (
+	terraformDestroy = dangerRule{name: "terraform-destroy", match: matchTerraformDestroy}
+	terraformState   = dangerRule{name: "terraform-state", match: matchTerraformState}
+)
 
 // PlanReader devolve o JSON de um plano salvo (tfplan.Show).
 type PlanReader func(cwd, chdir, planFile string) ([]byte, error)
@@ -145,8 +153,14 @@ func parseTerraformApply(tokens []string) (isApply bool, chdir, planFile string)
 }
 
 // terraformSubcommand: terraform [-chdir=DIR ...] SUBCOMANDO [argumentos].
+// Aceita também o OpenTofu (tofu), que tem a mesma linha de comando.
 func terraformSubcommand(tokens []string) (sub, chdir string, args []string) {
-	if len(tokens) == 0 || programName(tokens[0]) != "terraform" {
+	if len(tokens) == 0 {
+		return "", "", nil
+	}
+	switch programName(tokens[0]) {
+	case "terraform", "tofu":
+	default:
 		return "", "", nil
 	}
 
@@ -175,6 +189,27 @@ func matchTerraformDestroy(tokens []string) (string, bool) {
 func isDestroyFlag(arg string) bool {
 	flag := strings.TrimLeft(arg, "-")
 	return strings.HasPrefix(arg, "-") && (flag == "destroy" || flag == "destroy=true")
+}
+
+// matchTerraformState pega operações que mexem no state ou forçam recriação,
+// fora do fluxo normal de plano/apply.
+func matchTerraformState(tokens []string) (string, bool) {
+	sub, _, args := terraformSubcommand(tokens)
+	switch sub {
+	case "state":
+		if len(args) > 0 && args[0] == "rm" {
+			return stateRmDanger, true
+		}
+	case "taint":
+		return taintDanger, true
+	case "workspace":
+		if len(args) > 0 && args[0] == "delete" {
+			return workspaceDelDanger, true
+		}
+	case "force-unlock":
+		return forceUnlockDanger, true
+	}
+	return "", false
 }
 
 // maxCardResources mantém a janela dentro da tela.

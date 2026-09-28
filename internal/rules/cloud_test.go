@@ -23,7 +23,21 @@ func TestCloudDelete(t *testing.T) {
 		{`gcloud --project p projects delete p`, hook.Ask, hook.Deny},
 		{`gcloud sql instances delete db-prod`, hook.Deny, hook.Deny},
 
+		// Exclusão em massa de armazenamento.
+		{`aws s3 rm s3://dados/ --recursive`, hook.Ask, hook.Deny},
+		{`aws s3 rb s3://dados --force`, hook.Ask, hook.Deny},
+		{`gcloud storage rm -r gs://dados`, hook.Ask, hook.Deny},
+		{`gcloud storage rm gs://dados/obj`, hook.Ask, hook.Deny},
+		{`gsutil rm -r gs://dados`, hook.Ask, hook.Deny},
+		{`gsutil -m rm gs://dados/**`, hook.Ask, hook.Deny},
+		{`az storage blob delete-batch --source dados`, hook.Ask, hook.Deny},
+
 		// Parecidos e inofensivos: allow em qualquer ambiente.
+		{`aws s3 rm s3://dados/obj.txt`, hook.Allow, hook.Allow}, // um objeto, sem --recursive
+		{`aws s3 rb s3://dados`, hook.Allow, hook.Allow},         // rb sem --force falha se tiver conteúdo
+		{`aws s3 sync ./build s3://dados`, hook.Allow, hook.Allow},
+		{`gcloud storage ls gs://dados`, hook.Allow, hook.Allow},
+		{`gsutil ls gs://dados`, hook.Allow, hook.Allow},
 		{`aws s3 ls`, hook.Allow, hook.Allow},
 		{`aws ec2 describe-instances`, hook.Allow, hook.Allow},
 		{`aws --region us-east-1 ec2 describe-instances`, hook.Allow, hook.Allow},

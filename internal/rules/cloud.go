@@ -5,7 +5,10 @@ import (
 	"strings"
 )
 
-const cloudDeleteDanger = "o comando de nuvem apaga ou encerra recursos."
+const (
+	cloudDeleteDanger  = "o comando de nuvem apaga ou encerra recursos."
+	cloudStorageDanger = "o comando apaga objetos em massa ou um bucket inteiro de armazenamento na nuvem."
+)
 
 var cloudDelete = dangerRule{name: "cloud-delete", match: matchCloudDelete}
 
@@ -51,17 +54,41 @@ func matchCloudDelete(tokens []string) (string, bool) {
 	switch programName(tokens[0]) {
 	case "aws":
 		args := awsPositionals(tokens[1:])
-		if len(args) >= 2 && (args[1] == "terminate-instances" || strings.HasPrefix(args[1], "delete-")) {
-			return cloudDeleteDanger, true
+		if len(args) >= 2 {
+			service, op := args[0], args[1]
+			switch {
+			case op == "terminate-instances" || strings.HasPrefix(op, "delete-"):
+				return cloudDeleteDanger, true
+			case service == "s3" && op == "rm" && hasLongFlag(tokens, "--recursive"):
+				return cloudStorageDanger, true
+			case service == "s3" && op == "rb" && hasLongFlag(tokens, "--force"):
+				return cloudStorageDanger, true
+			}
 		}
 	case "az":
-		if slices.Contains(positionals(tokens[1:], azValueFlags), "delete") {
+		pos := positionals(tokens[1:], azValueFlags)
+		if slices.ContainsFunc(pos, func(a string) bool {
+			return a == "delete" || a == "purge" || strings.HasPrefix(a, "delete-")
+		}) {
 			return cloudDeleteDanger, true
 		}
 	case "gcloud":
-		if slices.Contains(positionals(tokens[1:], gcloudValueFlags), "delete") {
+		pos := positionals(tokens[1:], gcloudValueFlags)
+		if slices.Contains(pos, "delete") {
 			return cloudDeleteDanger, true
+		}
+		if len(pos) >= 2 && pos[0] == "storage" && pos[1] == "rm" {
+			return cloudStorageDanger, true
+		}
+	case "gsutil":
+		// gsutil rm [-r] gs://bucket/... apaga objetos ou o bucket.
+		if slices.Contains(positionals(tokens[1:], nil), "rm") {
+			return cloudStorageDanger, true
 		}
 	}
 	return "", false
+}
+
+func hasLongFlag(tokens []string, flag string) bool {
+	return slices.Contains(tokens, flag)
 }

@@ -44,17 +44,37 @@ tempo deixa o comando passar).
 
 ## O que ele bloqueia
 
+**Sempre bloqueia** (catastrófico em qualquer máquina):
+
+| Comando | |
+|---|---|
+| `git push --force`, `-f`, `+main`, `--mirror` | bloqueia |
+| `git push origin :main` / `--delete` de branch protegida (main, master, production...) | bloqueia |
+| `rm -rf /` · `/*` · `~` · `$HOME` · `/etc`, `/usr`... · `--no-preserve-root` | bloqueia |
+| `dd of=/dev/DISCO`, `mkfs*`, `wipefs`, `shred` de disco, `> /dev/DISCO` | bloqueia |
+| `chmod`/`chown -R` em caminho de sistema | bloqueia |
+
+**Pergunta fora de produção, bloqueia em produção:**
+
 | Comando | Fora de produção | Em produção |
 |---|---|---|
-| `git push --force`, `-f`, `+main` | bloqueia | bloqueia |
-| `git push --force-with-lease` | pergunta | pergunta |
 | `terraform apply` **sem** plano salvo (`-auto-approve`) | bloqueia | bloqueia |
 | `terraform apply tfplan` que apaga ou substitui recursos | pergunta, mostrando o cartão de risco | pergunta; **bloqueia** se for recurso crítico (banco, bucket, cluster) |
-| `terraform destroy`, `terraform apply -destroy` | pergunta | bloqueia |
-| `kubectl delete namespace`, `kubectl delete --all`, `kubectl drain` | pergunta | bloqueia |
-| `aws ... terminate-instances` / `delete-*`, `az ... delete`, `gcloud ... delete` | pergunta | bloqueia |
-| `DROP DATABASE`, `DROP TABLE`, `TRUNCATE`, `DELETE` sem `WHERE` (via `psql`, `mysql`, `sqlite3`...) | pergunta | bloqueia |
-| `git reset --hard`, `git clean -f` | pergunta | bloqueia |
+| `terraform destroy`, `apply -destroy` (e `tofu`) | pergunta | bloqueia |
+| `terraform state rm`, `taint`, `workspace delete`, `force-unlock` | pergunta | bloqueia |
+| `kubectl delete namespace`/`--all`/`pvc`/`pv`, `drain`, `scale --replicas=0`, `replace --force` | pergunta | bloqueia |
+| `kubectl delete -f arq.yaml` com `kind: Namespace`/`PVC`/`PV` (lê o arquivo) | pergunta | bloqueia |
+| `helm uninstall`, `helm rollback` | pergunta | bloqueia |
+| `aws ... terminate-instances`/`delete-*`, `az ... delete`, `gcloud ... delete` | pergunta | bloqueia |
+| `aws s3 rm --recursive`/`rb --force`, `gcloud storage rm`, `gsutil rm` | pergunta | bloqueia |
+| `DROP DATABASE`/`SCHEMA`/`TABLE`, `TRUNCATE`, `DELETE` sem `WHERE` (via `psql`, `mysql`, `sqlite3`...), inclusive em `psql -f arq.sql` / `mysql < arq.sql` (lê o arquivo) | pergunta | bloqueia |
+| `git push origin :branch` / `--delete` de outra branch remota | pergunta | pergunta |
+| `git reset --hard`, `git clean -f`, `branch -D`, `tag -d`, `reflog expire`, `gc --prune=now`, `filter-branch`, `restore`/`checkout` de descarte | pergunta | bloqueia |
+| `docker system`/`volume`/`image prune`, `volume rm`, `rm -f`, `compose down -v` | pergunta | bloqueia |
+| `shutdown`/`reboot`, `systemctl stop`/`disable`, `crontab -r`, flush de firewall | pergunta | bloqueia |
+| `curl`/`wget ... \| sh` (baixar e executar), `curl -X DELETE` | pergunta | bloqueia |
+| `npm`/`yarn`/`pnpm publish`, `npm unpublish`, `cargo publish`, `gem push`, `twine upload` | pergunta | bloqueia |
+| `find ... -delete`/`-exec`, `shred` de arquivo | pergunta | bloqueia |
 | o mesmo comando de infra repetido (agente em loop) | 3× em 5 min: pergunta · 6×: bloqueia | igual |
 | mais de 3 applies ou 20 recursos alterados na sessão | pergunta | pergunta |
 
@@ -96,8 +116,11 @@ normal ou pede que você mesmo rode o comando).
   pode apagar o banco de produção, o banco está em risco: dê ao agente
   credenciais que **não conseguem** fazer o que ele não deve. O Iron Brake é
   uma camada a mais, não a principal.
-- **Escapa com esforço:** `sh -c "..."`, prefixos (`env`, `sudo`), scripts e
-  Makefiles não são analisados por dentro.
+- **Enxerga através de disfarces de shell:** `sh -c "..."`, `eval`, prefixos
+  (`env`, `sudo`, `nohup`, `timeout`, `xargs`), aspas, `$'\x2d'`, subshells e
+  encadeamentos (`&&`, `;`, `|`) são desmontados e analisados. **Mas:** o
+  comando montado em variável (`$RM -rf /`), scripts e Makefiles não são
+  analisados por dentro.
 - **Não é contra um agente malicioso:** ele protege de erros e loops. Um
   agente com o seu usuário pode apagar o estado da sessão ou reescrever o log.
 - A janela de confirmação só existe no macOS; no Linux e no Windows, o motivo

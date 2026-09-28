@@ -34,6 +34,8 @@ para o que pode ser certo, mas cujo custo é alto e o contexto é seu.
 |---|---|
 | `git push --force`, `-f`, flags agrupadas (`-fu`), refspec `+main` | deny |
 | `git push --force-with-lease`, `--force-if-includes` | ask |
+| `git push origin :main`, `--delete`/`-d` de branch **protegida** (main, master, production, prod, prd, release, develop, trunk) | deny |
+| `git push origin :branch`, `--delete` de **outra** branch remota | ask |
 | qualquer outro | allow |
 
 ## Produção e o `.iron/policy.yaml`
@@ -69,17 +71,42 @@ kubectl (`KUBECONFIG` ou `~/.kube/config`), `AWS_PROFILE`,
 
 | Categoria | Arquivo | Reconhecido como perigoso | Continua liberado (exemplos) |
 |---|---|---|---|
-| git | `git.go` | `git reset --hard`; `git clean` com `-f`/`--force` (sem `-n`) | `git reset --soft`, `git reset HEAD arq`, `git clean -n`, `git clean -fdn` |
-| terraform | `terraform.go` | `terraform destroy`; `terraform apply -destroy` (com ou sem plano) | `terraform plan -destroy -out=tfplan` (o apply desse plano passa pela regra do apply e mostra o cartão) |
-| kubernetes | `kubernetes.go` | `kubectl delete namespace/ns/namespaces ...`; `kubectl delete ... --all`; `kubectl drain` | `kubectl get namespaces`, `kubectl delete pod web-1`, `kubectl delete pods -l app=x`, `kubectl cordon` |
-| nuvem | `cloud.go` | `aws ... terminate-instances`, `aws ... delete-*`; `az ... delete`; `gcloud ... delete` | `aws s3 ls`, `aws ec2 describe-instances`, `az group list`, `gcloud compute instances list` |
-| SQL | `sql.go` | com um cliente SQL na linha (`psql`, `mysql`, `mariadb`, `sqlite3`, `sqlcmd`, `clickhouse-client`, `cockroach`): `DROP DATABASE`, `DROP TABLE`, `TRUNCATE`, `DELETE` sem `WHERE` | `SELECT`, `DELETE ... WHERE`, `DROP INDEX`; SQL sem cliente na linha (`grep "DROP TABLE"`, mensagem de commit) |
+| git (descarte/histórico) | `git.go` | `git reset --hard`; `git clean` com `-f`/`--force` (sem `-n`); `git branch -D` (ou `-d --force`); `git tag -d`; `git stash drop`/`clear`; `git reflog expire`; `git gc --prune=now`/`=all`; `git filter-branch`/`filter-repo`; `git update-ref -d`; `git restore`/`git checkout` que descartam o diretório de trabalho | `git reset --soft`, `git clean -n`, `git branch -d` (sem force), `git gc`, `git gc --prune=never`, `git restore --staged arq`, `git checkout main`, `git checkout -b nova` |
+| terraform (destroy) | `terraform.go` | `terraform destroy`; `terraform apply -destroy` (com ou sem plano); idem para `tofu` | `terraform plan -destroy -out=tfplan` (o apply desse plano passa pela regra do apply) |
+| terraform (state) | `terraform.go` | `terraform state rm`; `terraform taint`; `terraform workspace delete`; `terraform force-unlock`; idem `tofu` | `terraform state list/show`, `terraform untaint`, `terraform workspace list/select` |
+| kubernetes | `kubernetes.go` | `kubectl delete namespace/ns ...`; `kubectl delete ... --all`; `kubectl delete pvc/pv ...`; `kubectl delete -f arq.yaml` com `kind: Namespace`/`PersistentVolumeClaim`/`PersistentVolume`; `kubectl drain`; `kubectl scale --replicas=0`; `kubectl replace --force` | `kubectl get namespaces`, `kubectl delete pod web-1`, `kubectl delete -f` de outro `kind`, `kubectl scale --replicas=3`, `kubectl replace -f`, `kubectl cordon` |
+| helm | `helm.go` | `helm uninstall`/`delete`; `helm rollback` | `helm install`, `helm upgrade`, `helm list`, `helm status`, `helm template` |
+| nuvem (recursos) | `cloud.go` | `aws ... terminate-instances`, `aws ... delete-*`; `az ... delete`/`purge`/`delete-*`; `gcloud ... delete` | `aws s3 ls`, `aws ec2 describe-instances`, `az group list`, `gcloud compute instances list` |
+| nuvem (storage em massa) | `cloud.go` | `aws s3 rm --recursive`; `aws s3 rb --force`; `gcloud storage rm`; `gsutil rm` | `aws s3 rm um-objeto`, `aws s3 sync`, `gcloud storage ls`, `gsutil ls` |
+| SQL | `sql.go` | com um cliente SQL na linha (`psql`, `mysql`, `mariadb`, `sqlite3`, `sqlcmd`, `clickhouse-client`, `cockroach`): `DROP DATABASE`, `DROP SCHEMA`, `DROP TABLE`, `TRUNCATE`, `DELETE` sem `WHERE` — na linha (`-c`, heredoc, `echo ... \| psql`) **ou** no arquivo (`psql -f arq.sql`, `mysql < arq.sql`) | `SELECT`, `DELETE ... WHERE`, `DROP INDEX`; SQL sem cliente na linha (`grep "DROP TABLE"`, mensagem de commit) |
+
+Arquivos apontados por `-f`/`<` que não dão para ler (remoto, stdin, ausente)
+seguem a regra do alvo ilegível: allow fora de produção, ask em produção.
+| arquivos (perigoso) | `filesystem.go` | `find ... -delete`/`-exec`; `shred` de arquivo | `find ... -print`, `find ... -name` |
+| contêineres | `container.go` | `docker/podman system|volume|image|container prune`; `docker volume rm`; `docker rm -f`; `docker compose down -v` | `docker ps`, `docker rm` (sem `-f`), `docker compose down`, `docker volume ls` |
+| sistema | `system.go` | `shutdown`/`reboot`/`poweroff`/`halt`/`init 0|6`; `systemctl stop`/`disable`/`mask`/`kill`; `crontab -r`; flush de firewall (`iptables -F`, `nft flush ruleset`, `ufw disable`/`reset`, `pfctl -F`) | `systemctl status`/`start`/`restart`, `crontab -l`, `iptables -L`, `ufw status` |
+| rede → shell | `remotecode.go` | `curl`/`wget ... \| sh/bash/python/...` (baixar e executar); `curl -X DELETE`/`wget --method=DELETE` | `curl ... -o arquivo`, `curl -X GET/POST`, `wget arquivo.tar.gz` |
+| publicação de pacote | `publish.go` | `npm/pnpm/yarn/bun publish`; `npm unpublish`; `cargo publish`; `gem push`; `twine upload` | `npm install`/`ci`/`run`, `cargo build`, `gem install` |
 
 `git clean -f` sem `-d` também conta: ele já apaga arquivos não rastreados
 sem volta.
 
 Não dependem do ambiente: force push (deny), `--force-with-lease` (ask) e
 apply sem plano / plano ilegível / `cd` antes do apply (deny).
+
+## Bloqueios sempre (deny em qualquer ambiente)
+
+Alguns comandos são catastróficos em produção **e** na máquina do
+desenvolvedor; não faz sentido só perguntar. São deny em qualquer ambiente:
+
+| Categoria | Arquivo | Reconhecido como perigoso | Continua liberado (exemplos) |
+|---|---|---|---|
+| arquivos (catastrófico) | `filesystem.go` | `rm -r` em caminho crítico (`/`, `/*`, `~`, `$HOME`, dirs de sistema como `/etc`, `/usr`); `rm --no-preserve-root`; `dd of=/dev/DISCO`; `mkfs*`; `wipefs`; `shred` de dispositivo; `chmod`/`chown -R` em caminho de sistema; redirecionar (`>`, `>>`) para `/dev/DISCO` | `rm -rf build`, `rm -rf node_modules`, `dd of=disco.img`, `dd of=/dev/null`, `chmod -R 755 ./scripts`, `echo x > saida.txt`, `echo x > /dev/null` |
+| force push (git) | `git.go` | `git push --force`/`-f`/refspec `+main`/`--mirror` | `git push`, `git push -u`, `git push --follow-tags` |
+
+**Limite conhecido:** o hook só vê a linha de comando. Comando montado em
+variável (`RM=rm; $RM -rf /`) ou chamado via SDK da nuvem passa por dentro;
+a defesa dessa via é o Iron Shield e o privilégio mínimo, não o Brake.
 
 **Terraform apply com plano salvo:** plano que apaga ou substitui algum tipo
 de `critical_resource_types` **em produção** → deny, com o cartão de risco no
@@ -91,9 +118,10 @@ continua igual.
 - **Falso positivo:** bloquear algo inofensivo (ex.: barrar `kubectl get ns`).
   Custo: atrito — o agente para e você perde tempo; em excesso, as pessoas
   desligam a proteção.
-- **Falso negativo:** deixar passar algo destrutivo (ex.: liberar
-  `aws s3 rm --recursive`). Custo: perda de dados ou de infraestrutura, às
-  vezes sem volta.
+- **Falso negativo:** deixar passar algo destrutivo (ex.: um comando montado em
+  variável, `$RM -rf /`, ou uma exclusão via SDK da nuvem, que não aparecem na
+  linha de comando). Custo: perda de dados ou de infraestrutura, às vezes sem
+  volta.
 
 Equilíbrio escolhido: nos comandos que conhecemos, **preferir falso positivo**
 (na dúvida, trava), mas com regras **estreitas e testadas** com casos

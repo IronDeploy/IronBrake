@@ -170,6 +170,29 @@ func TestTerraformDestroy(t *testing.T) {
 		{`terraform workspace list`, hook.Allow, hook.Allow},
 		{`echo terraform destroy`, hook.Allow, hook.Allow},
 		{`git commit -m "terraform destroy"`, hook.Allow, hook.Allow},
+
+		// OpenTofu tem a mesma linha de comando.
+		{`tofu destroy`, hook.Ask, hook.Deny},
+		{`tofu apply -destroy`, hook.Ask, hook.Deny},
+	})
+}
+
+func TestTerraformState(t *testing.T) {
+	runRuleCases(t, terraformState, []ruleCase{
+		{`terraform state rm aws_db_instance.main`, hook.Ask, hook.Deny},
+		{`terraform -chdir=infra state rm module.db`, hook.Ask, hook.Deny},
+		{`terraform taint aws_instance.web`, hook.Ask, hook.Deny},
+		{`terraform workspace delete antigo`, hook.Ask, hook.Deny},
+		{`terraform force-unlock 1234-5678`, hook.Ask, hook.Deny},
+		{`tofu state rm module.db`, hook.Ask, hook.Deny},
+
+		// Inofensivos.
+		{`terraform state list`, hook.Allow, hook.Allow},
+		{`terraform state show aws_instance.web`, hook.Allow, hook.Allow},
+		{`terraform untaint aws_instance.web`, hook.Allow, hook.Allow},
+		{`terraform workspace list`, hook.Allow, hook.Allow},
+		{`terraform workspace select default`, hook.Allow, hook.Allow},
+		{`echo terraform state rm x`, hook.Allow, hook.Allow},
 	})
 }
 

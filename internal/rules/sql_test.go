@@ -12,6 +12,7 @@ func TestSQLDestructive(t *testing.T) {
 		{`psql -c "DROP TABLE users"`, hook.Ask, hook.Deny},
 		{`psql -c "drop database shop"`, hook.Ask, hook.Deny},
 		{`mysql -e "DROP DATABASE shop"`, hook.Ask, hook.Deny},
+		{`psql -c "DROP SCHEMA public CASCADE"`, hook.Ask, hook.Deny},
 		{`psql -c "TRUNCATE users, orders"`, hook.Ask, hook.Deny},
 		{`mysql -e "DELETE FROM users"`, hook.Ask, hook.Deny},
 		{`sqlite3 app.db "delete from sessions;"`, hook.Ask, hook.Deny},
@@ -32,4 +33,51 @@ func TestSQLDestructive(t *testing.T) {
 		{`git commit -m "remove DROP TABLE do seed"`, hook.Allow, hook.Allow},
 		{`echo "DROP TABLE users" > drop.sql`, hook.Allow, hook.Allow},
 	})
+}
+
+func TestSQLFile(t *testing.T) {
+	files := map[string]string{
+		"/work/drop.sql":  "DROP TABLE users;\n",
+		"/work/clean.sql": "DELETE FROM sessions;\n",
+		"/work/seed.sql":  "INSERT INTO users VALUES (1);\nSELECT * FROM users;\n",
+		"/work/safe.sql":  "DELETE FROM sessions WHERE expired = true;\n",
+	}
+	dev := withFiles(devEnv, files)
+	prod := withFiles(prodEnv, files)
+
+	cases := []struct {
+		command   string
+		dev, prod hook.Decision
+	}{
+		// psql -f: lê o arquivo e acha o SQL destrutivo.
+		{`psql -f drop.sql`, hook.Ask, hook.Deny},
+		{`psql --file=clean.sql`, hook.Ask, hook.Deny},
+		{`psql -f drop.sql -d loja`, hook.Ask, hook.Deny},
+
+		// Redireção de entrada vale para qualquer cliente.
+		{`mysql loja < drop.sql`, hook.Ask, hook.Deny},
+		{`sqlite3 app.db < clean.sql`, hook.Ask, hook.Deny},
+
+		// Arquivo inofensivo.
+		{`psql -f seed.sql`, hook.Allow, hook.Allow},
+		{`psql -f safe.sql`, hook.Allow, hook.Allow},
+
+		// Alvo ilegível: allow fora de produção, ask em produção.
+		{`psql -f nao-existe.sql`, hook.Allow, hook.Ask},
+		{`mysql < -`, hook.Allow, hook.Ask},
+
+		// mysql -f é --force, não arquivo: não deve tentar ler "drop.sql".
+		{`mysql -f -e "SELECT 1"`, hook.Allow, hook.Allow},
+	}
+
+	for _, c := range cases {
+		t.Run(c.command, func(t *testing.T) {
+			if got, r := checkRule(sqlDestructive, c.command, dev); got != c.dev {
+				t.Errorf("fora de produção: esperava %q, obtive %q (%q)", c.dev, got, r)
+			}
+			if got, r := checkRule(sqlDestructive, c.command, prod); got != c.prod {
+				t.Errorf("produção: esperava %q, obtive %q (%q)", c.prod, got, r)
+			}
+		})
+	}
 }

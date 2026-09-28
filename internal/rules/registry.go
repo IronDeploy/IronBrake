@@ -4,9 +4,19 @@ package rules
 // porque precisa ler o plano (InspectTerraformApply).
 var registry = []Rule{
 	gitForcePush,
+	gitPushDelete,
 	gitDiscard,
 	terraformDestroy,
+	terraformState,
 	kubectlDelete,
+	kubectlDeleteFile,
+	helmDestructive,
 	cloudDelete,
 	sqlDestructive,
+	fsCatastrophic,
+	fsDangerous,
+	remoteCode,
+	containerDelete,
+	systemDestructive,
+	publishDestructive,
 }
