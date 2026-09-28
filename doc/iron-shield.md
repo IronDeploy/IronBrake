@@ -2,10 +2,26 @@
 
 O Iron Shield é o raio-X de credenciais do Iron Deploy: ele lista o que um
 agente de IA rodando na sua máquina **conseguiria alcançar** e ajuda a tirar
-essas credenciais do caminho. São dois comandos:
+essas credenciais do caminho. Comandos:
 
 - `iron scan` — mostra as credenciais ao alcance (só leitura, sem rede).
+- `iron scan --manage` — a mesma varredura, numa tela interativa: setas
+  navegam entre as categorias achadas, **Enter oculta/mostra** cada uma na
+  hora, **Esc ou `q`** sai. Ver seção própria abaixo.
 - `iron init --harden` — grava regras que **bloqueiam a leitura** desses lugares.
+- `iron shield status` — mostra o que está travado e o que não está.
+- `iron shield lock` — trava a leitura das credenciais (o mesmo que `init --harden`,
+  mas funciona sozinho, sem precisar de `iron init` antes).
+- `iron shield unlock` — destrava: remove exatamente as regras do Iron Shield,
+  sem tocar em nenhuma outra regra `deny`/`allow` do arquivo. As credenciais
+  voltam a ficar visíveis ao agente até o próximo `lock`.
+
+`lock` e `unlock` são um par simétrico e idempotente: rodar de novo sem
+mudança não dá erro, e cada um só mexe nas regras que ele mesmo controla.
+Os dois (e cada toggle do `--manage`) ficam registrados em
+`~/.iron/audit.log` (classe `iron shield`, decisão `lock`/`unlock`) —
+destravar credenciais é uma decisão de risco e precisa estar no mesmo
+rastro de auditoria que as do hook.
 
 ## Regra de ouro
 
@@ -59,6 +75,35 @@ Iron Shield — raio-X das credenciais ao alcance do agente
 
 2 credencial(is) ao alcance. Nenhum valor de segredo foi lido ou impresso.
 ```
+
+## `iron scan --manage`: gerenciar visibilidade por categoria
+
+Diferente de `iron shield lock`/`unlock`, que trava ou destrava **tudo de
+uma vez**, o `--manage` opera **por categoria** (AWS, SSH, Kubernetes, GCP,
+Azure, Terraform, npm, PyPI, Docker, GitHub CLI, `.netrc`, `.pgpass`, `.env`)
+— a mesma agrupação que `internal/shield.Categories` usa para ligar cada
+achado do scan às regras `deny` que o escondem. Só entram na tela categorias
+com **pelo menos um achado nesta máquina agora**; sem achado nenhum, mostra
+"Nenhuma credencial de risco encontrada" e não há nada para gerenciar.
+
+Cada linha mostra: gravidade do pior achado daquela categoria (🔴🟠🟡⚪, igual
+ao `iron scan`), status (`⛔ OCULTA` ou `✅ VISÍVEL`), o nome da categoria e
+quantos achados. **Enter** troca o estado na hora — grava ou apaga a(s)
+regra(s) `deny` daquela categoria no `.claude/settings.json` **imediatamente**,
+sem "salvar ao sair": uma queda de terminal no meio não perde o que já foi
+alternado. **Esc** ou **`q`** sai sem mais perguntas.
+
+Duas fontes que o `iron scan` relata **não têm como ser ocultadas por essa
+tela** (aparecem como `N/D`, com o motivo embaixo quando selecionadas):
+
+- **Variáveis de ambiente** — não são arquivo; a regra `Read(...)` do Claude
+  Code não alcança. A defesa aqui é rodar o agente num shell/sandbox sem
+  essas variáveis.
+- **git** (token embutido na URL do remote) — o segredo mora dentro do
+  `.git/config`; bloquear a leitura desse arquivo quebraria comandos git
+  legítimos do agente.
+
+Precisa de um terminal de verdade (tty) — não roda dentro de um pipe/script.
 
 ## O que o `iron init --harden` faz
 

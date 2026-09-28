@@ -20,6 +20,7 @@ import (
 	"github.com/IronDeploy/IronBrake/internal/scan"
 	"github.com/IronDeploy/IronBrake/internal/session"
 	"github.com/IronDeploy/IronBrake/internal/setup"
+	"github.com/IronDeploy/IronBrake/internal/shieldui"
 	"github.com/IronDeploy/IronBrake/internal/tfplan"
 )
 
@@ -41,6 +42,10 @@ const usage = `uso: iron <subcomando>
   init --harden grava também regras deny de leitura das credenciais (Iron Shield)
   doctor        verifica se o hook desta pasta está mesmo protegendo
   scan          raio-X das credenciais ao alcance do agente (Iron Shield, só leitura)
+  scan --manage igual, mas interativo: setas navegam, enter oculta/mostra, esc/q sai
+  shield status mostra quais credenciais estão travadas e quais não estão
+  shield lock   trava a leitura das credenciais (não precisa de "init" antes)
+  shield unlock destrava a leitura — credenciais ficam visíveis ao agente até travar de novo
   audit verify  confere se a corrente do log de auditoria (~/.iron/audit.log) está íntegra
   version       mostra a versão`
 
@@ -61,7 +66,12 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case "doctor":
 		return doctorHere(stdout, stderr)
 	case "scan":
+		if slices.Contains(args[1:], "--manage") {
+			return runScanManage(stdout, stderr)
+		}
 		return runScan(stdout, stderr)
+	case "shield":
+		return runShield(args[1:], stdout, stderr)
 	case "audit":
 		return runAudit(args[1:], stdout, stderr)
 	case "version":
@@ -329,20 +339,22 @@ func runInit(dir, exePath string, harden bool, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// runScan roda o Iron Shield: raio-X de credenciais, só leitura e sem rede.
-func runScan(stdout, stderr io.Writer) int {
+// localFilesystem monta o Filesystem que o Iron Shield varre nesta máquina:
+// leitura sem travar (safefile) e sem seguir link nenhum além do que
+// os.ReadDir já resolve. "iron scan" e "iron scan --manage" usam exatamente
+// a mesma varredura — o manage não reimplementa nada, só mostra o resultado
+// de um jeito interativo.
+func localFilesystem() (scan.Filesystem, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Fprintf(stderr, "iron: não consegui achar o home: %v\n", err)
-		return 1
+		return scan.Filesystem{}, fmt.Errorf("não consegui achar o home: %w", err)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(stderr, "iron: %v\n", err)
-		return 1
+		return scan.Filesystem{}, err
 	}
 
-	fs := scan.Filesystem{
+	return scan.Filesystem{
 		Home: home,
 		Cwd:  cwd,
 		Read: func(path string) ([]byte, error) { return safefile.Read(path, 1<<20) },
@@ -357,11 +369,146 @@ func runScan(stdout, stderr io.Writer) int {
 			}
 			return names, nil
 		},
+	}, nil
+}
+
+// runScan roda o Iron Shield: raio-X de credenciais, só leitura e sem rede.
+func runScan(stdout, stderr io.Writer) int {
+	fs, err := localFilesystem()
+	if err != nil {
+		fmt.Fprintf(stderr, "iron: %v\n", err)
+		return 1
 	}
 
 	findings := scan.Scan(fs, envMap(os.Environ()))
 	fmt.Fprint(stdout, scan.Report(findings))
 	return 0
+}
+
+// runScanManage roda o mesmo raio-X do "iron scan", mas numa tela interativa:
+// setas navegam entre as categorias achadas, enter oculta/mostra cada uma
+// (grava/apaga as regras deny na hora) e esc/q sai. Precisa de um terminal de
+// verdade — por isso usa os.Stdin/os.Stdout direto, não os io.Reader/Writer
+// injetados no resto do "iron" (raw mode opera no descritor do arquivo).
+func runScanManage(stdout, stderr io.Writer) int {
+	fs, err := localFilesystem()
+	if err != nil {
+		fmt.Fprintf(stderr, "iron: %v\n", err)
+		return 1
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(stderr, "iron: %v\n", err)
+		return 1
+	}
+	settingsPath := setup.SettingsPath(dir)
+
+	findings := scan.Scan(fs, envMap(os.Environ()))
+	onToggle := func(action, category string, n int) {
+		logShieldEventFor(stderr, action, fmt.Sprintf("%s: %d regra(s)", category, n))
+	}
+
+	if err := shieldui.Run(settingsPath, findings, os.Stdin, os.Stdout, onToggle); err != nil {
+		fmt.Fprintf(stderr, "iron: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// runShield trava/destrava/mostra o estado do bloqueio de leitura das
+// credenciais (permissions.deny). Funciona mesmo sem "iron init" ter rodado
+// antes: lock cria o settings do zero, igual a "init --harden".
+func runShield(args []string, stdout, stderr io.Writer) int {
+	const shieldUsage = "uso: iron shield status|lock|unlock"
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, shieldUsage)
+		return 2
+	}
+
+	dir, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(stderr, "iron: %v\n", err)
+		return 1
+	}
+	settingsPath := setup.SettingsPath(dir)
+
+	switch args[0] {
+	case "status":
+		return shieldStatus(settingsPath, stdout, stderr)
+	case "lock":
+		return shieldLock(settingsPath, stdout, stderr)
+	case "unlock":
+		return shieldUnlock(settingsPath, stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "iron: subcomando de shield desconhecido %q\n\n%s\n", args[0], shieldUsage)
+		return 2
+	}
+}
+
+func shieldStatus(settingsPath string, stdout, stderr io.Writer) int {
+	st, err := setup.Status(settingsPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "iron: %v\n", err)
+		return 1
+	}
+	total := len(st.Locked) + len(st.Unlocked)
+	if len(st.Unlocked) == 0 {
+		fmt.Fprintf(stdout, "iron: Iron Shield TRAVADO — %d/%d regra(s) bloqueando leitura de credenciais em %s\n", len(st.Locked), total, settingsPath)
+		return 0
+	}
+	fmt.Fprintf(stdout, "iron: Iron Shield DESTRAVADO — %d/%d regra(s) faltando em %s\n", len(st.Unlocked), total, settingsPath)
+	for _, rule := range st.Unlocked {
+		fmt.Fprintf(stdout, "   • %s\n", rule)
+	}
+	fmt.Fprintln(stdout, "rode \"iron shield lock\" para travar.")
+	return 0
+}
+
+func shieldLock(settingsPath string, stdout, stderr io.Writer) int {
+	added, err := setup.Harden(settingsPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "iron: %v\n", err)
+		return 1
+	}
+	logShieldEvent(stderr, "lock", len(added))
+	if len(added) > 0 {
+		fmt.Fprintf(stdout, "iron: %d regra(s) deny gravada(s). Iron Shield travado.\n", len(added))
+	} else {
+		fmt.Fprintln(stdout, "iron: Iron Shield já estava travado.")
+	}
+	return 0
+}
+
+func shieldUnlock(settingsPath string, stdout, stderr io.Writer) int {
+	removed, err := setup.Unharden(settingsPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "iron: %v\n", err)
+		return 1
+	}
+	logShieldEvent(stderr, "unlock", len(removed))
+	if len(removed) > 0 {
+		fmt.Fprintf(stdout, "iron: %d regra(s) deny removida(s). Iron Shield DESTRAVADO — as credenciais voltam a ficar visíveis ao agente.\n", len(removed))
+		fmt.Fprintln(stdout, "      rode \"iron shield lock\" assim que terminar o que precisa fazer.")
+	} else {
+		fmt.Fprintln(stdout, "iron: Iron Shield já estava destravado (nenhuma regra para remover).")
+	}
+	return 0
+}
+
+// logShieldEvent grava lock/unlock no log de auditoria: destravar credenciais
+// é uma decisão de risco e precisa ficar no mesmo rastro que as do hook.
+func logShieldEvent(stderr io.Writer, action string, count int) {
+	logShieldEventFor(stderr, action, fmt.Sprintf("%d regra(s)", count))
+}
+
+// logShieldEventFor é o logShieldEvent genérico: rule é o texto livre que
+// identifica o que mudou ("N regra(s)" para lock/unlock de tudo, ou
+// "<categoria>: N regra(s)" para um toggle individual no scan --manage).
+func logShieldEventFor(stderr io.Writer, action, rule string) {
+	entry := audit.Entry{Class: "iron shield", Decision: action, Rule: rule}
+	if err := writeAudit(entry); err != nil {
+		fmt.Fprintln(stderr, "iron: não consegui gravar o log de auditoria")
+	}
 }
 
 // envMap transforma os.Environ() ("NOME=valor") em mapa nome→valor.

@@ -525,6 +525,147 @@ func TestRunInitInvalidSettingsFailsWithoutTouchingFile(t *testing.T) {
 	}
 }
 
+func TestRunShieldStatusLockUnlock(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("HOME", t.TempDir()) // isola o log de auditoria de ~/.iron real
+	settings := filepath.Join(dir, ".claude", "settings.json")
+
+	t.Run("status sem iron init nem harden: tudo destravado", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"shield", "status"}, strings.NewReader(""), &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("código: esperava 0, obtive %d (stderr=%q)", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "DESTRAVADO") {
+			t.Errorf("esperava reportar DESTRAVADO: %q", stdout.String())
+		}
+		if _, err := os.Stat(settings); !os.IsNotExist(err) {
+			t.Error("status não deveria criar o settings.json")
+		}
+	})
+
+	t.Run("lock funciona sem iron init ter rodado antes", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"shield", "lock"}, strings.NewReader(""), &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("código: esperava 0, obtive %d (stderr=%q)", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "travado") {
+			t.Errorf("esperava confirmar o travamento: %q", stdout.String())
+		}
+		data, err := os.ReadFile(settings)
+		if err != nil {
+			t.Fatalf("lock deveria ter criado o settings.json: %v", err)
+		}
+		if !strings.Contains(string(data), "Read(~/.aws/**)") {
+			t.Errorf("settings.json deveria conter as regras do Iron Shield:\n%s", data)
+		}
+	})
+
+	t.Run("status depois do lock: tudo travado", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"shield", "status"}, strings.NewReader(""), &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("código: esperava 0, obtive %d", code)
+		}
+		if !strings.Contains(stdout.String(), "TRAVADO") || strings.Contains(stdout.String(), "DESTRAVADO") {
+			t.Errorf("esperava reportar TRAVADO (e não DESTRAVADO): %q", stdout.String())
+		}
+	})
+
+	t.Run("unlock destrava e preserva o resto do settings", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"shield", "unlock"}, strings.NewReader(""), &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("código: esperava 0, obtive %d (stderr=%q)", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "DESTRAVADO") {
+			t.Errorf("esperava confirmar o destravamento: %q", stdout.String())
+		}
+		data, err := os.ReadFile(settings)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "Read(~/.aws/**)") {
+			t.Errorf("unlock deveria ter removido as regras do Iron Shield:\n%s", data)
+		}
+		// O hook instalado por um "iron init" anterior (se houvesse) não seria
+		// tocado; aqui confirmamos que o arquivo continua um JSON válido com a
+		// chave permissions ainda presente (mesmo que a lista fique vazia).
+		if !strings.Contains(string(data), "permissions") {
+			t.Errorf("settings.json não deveria perder a chave permissions:\n%s", data)
+		}
+	})
+
+	t.Run("unlock de novo: nada a fazer, sem erro", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"shield", "unlock"}, strings.NewReader(""), &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("código: esperava 0, obtive %d (stderr=%q)", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "já estava destravado") {
+			t.Errorf("esperava avisar que já estava destravado: %q", stdout.String())
+		}
+	})
+}
+
+func TestRunShieldUnlockWithoutAnySettingsIsANoop(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("HOME", t.TempDir())
+	var stdout, stderr bytes.Buffer
+
+	code := run([]string{"shield", "unlock"}, strings.NewReader(""), &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("código: esperava 0, obtive %d (stderr=%q)", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "já estava destravado") {
+		t.Errorf("esperava avisar que já estava destravado: %q", stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".claude", "settings.json")); !os.IsNotExist(err) {
+		t.Error("unlock sem lock/harden anterior não deveria criar o settings.json")
+	}
+}
+
+func TestRunShieldBadSubcommand(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	var stdout, stderr bytes.Buffer
+
+	code := run([]string{"shield", "banana"}, strings.NewReader(""), &stdout, &stderr)
+
+	if code != 2 {
+		t.Errorf("código: esperava 2, obtive %d", code)
+	}
+	if !strings.Contains(stderr.String(), "banana") {
+		t.Errorf("stderr deveria citar o subcomando desconhecido: %q", stderr.String())
+	}
+}
+
+func TestRunShieldLockUnlockWriteAuditEntries(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	run([]string{"shield", "lock"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	run([]string{"shield", "unlock"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+
+	data, err := os.ReadFile(filepath.Join(home, ".iron", "audit.log"))
+	if err != nil {
+		t.Fatalf("esperava um log de auditoria em ~/.iron/audit.log: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, `"class":"iron shield"`) || !strings.Contains(log, `"decision":"lock"`) {
+		t.Errorf("esperava registrar o lock no log de auditoria:\n%s", log)
+	}
+	if !strings.Contains(log, `"decision":"unlock"`) {
+		t.Errorf("esperava registrar o unlock no log de auditoria:\n%s", log)
+	}
+}
+
 func TestRunDoctor(t *testing.T) {
 	t.Run("tudo certo sai com 0", func(t *testing.T) {
 		dir := t.TempDir()
