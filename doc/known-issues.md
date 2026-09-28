@@ -221,9 +221,19 @@ Decisões tomadas depois da revisão:
   linha de comando não são reconhecidos pelas regras.
 - **O `SHA256SUMS` vem da mesma release que o binário:** pega download
   corrompido, não release adulterada (ver [release.md](release.md)).
-- **O fluxo de release nunca rodou:** o projeto ainda não é um repositório
-  git nem está no GitHub; os testes nunca rodaram em Linux (só a compilação).
-- **Sem licença:** antes de publicar, é preciso escolher uma.
+- **Fluxo de release verificado em 2026-09-28:** a tag `v0.1.0` rodou o
+  `.github/workflows/release.yml` de ponta a ponta — `test` e `release`
+  concluíram com sucesso, e a release saiu em
+  [github.com/IronDeploy/IronBrake/releases/tag/v0.1.0](https://github.com/IronDeploy/IronBrake/releases/tag/v0.1.0)
+  com os 6 binários, o `install.sh` e o `SHA256SUMS`. Os testes rodaram em
+  Linux pela primeira vez (antes só tinha sido compilação cruzada) e
+  passaram.
+- **A release saiu sem aprovação humana**, porque o *Environment* "release"
+  (Settings → Environments → *Required reviewers*) ainda não foi configurado
+  no repositório — o GitHub cria o ambiente na hora, sem proteção nenhuma,
+  quando ele não existe. **Pendência:** configurar o *Required reviewers*
+  antes da próxima tag, se o objetivo é que uma pessoa aprove cada release
+  antes de publicar (é assim que o `release.md` descreve o fluxo).
 
 ## 14. Outros limites
 
@@ -236,3 +246,24 @@ Decisões tomadas depois da revisão:
 - **Endereços no cartão:** chaves de `for_each` aparecem no endereço (ex.:
   `aws_iam_user.u["ana@empresa.com"]`). Não são atributos, mas podem conter
   dados que você preferiria não ver na tela.
+
+## 15. Pendências fora do binário (roadmap do plano, não são bugs)
+
+Diferente das seções acima, isto não foi "verificado com o binário" — é
+trabalho que o plano original prevê e ainda não começou.
+
+**v0.5 (depois da validação, seção 11 do plano):**
+- Estimativa de custo no cartão de risco (`terraform show` → Infracost ou
+  OpenInfraQuote). O que o v0.5 do plano também listava aqui — regra de
+  `curl`/`wget` com `-X DELETE` — **já está implementado** (seção 2 acima,
+  `internal/rules/remotecode.go`).
+- Guia por nuvem de como criar um perfil só-leitura para o agente.
+
+**Validação com usuário real (seção 11 do plano) — nada disso começou:**
+- 10 conversas de 20 min com desenvolvedores/tech leads sobre a dor real
+  (agente com credencial de nuvem, o que já deu errado).
+- 3 a 5 testadores usando por duas semanas, com as métricas da seção 11
+  (tempo até o primeiro bloqueio, bloqueios indevidos por semana, bloqueios
+  que evitariam dano, times que pedem política central/Slack).
+- Decisão registrada (seguir para o plano de controle, pivotar ou parar) só
+  depois disso — não antes.
