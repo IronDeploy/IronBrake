@@ -109,6 +109,7 @@ acrescentar as suas, crie `.iron/policy.yaml`:
 ```yaml
 production_patterns: [live]
 critical_resource_types: [google_sql_database_instance]
+assume_production: true   # opcional: cluster/perfil/workspace sem nome de teste (dev, staging, qa...) vale como produção
 audit_log:            # opcional: guardar mais do log de auditoria (de 5 a 100)
   max_size_mb: 20     # tamanho de cada arquivo antes de girar (padrão 5)
   keep: 10            # arquivos antigos guardados (padrão 5)
@@ -179,11 +180,14 @@ caminho do agente. Detalhes e tabela completa em [doc/iron-shield.md](doc/iron-s
 
 Comandos são desmontados e analisados através de `sh -c`, `eval`, prefixos
 (`env`, `sudo`, `nohup`, `timeout`, `xargs`...), aspas, `$'\x2d'`, subshells
-e encadeamentos (`&&`, `;`, `|`). Ainda assim, exigindo esforço deliberado,
-escapam: comando montado em variável (`F=--force; git push $F`), aliases e
-funções do shell, comando dentro de um script ou Makefile (`./deploy.sh`,
-`make deploy`), execução via outra linguagem (`python3 -c "..."`) e comando
-rodado numa máquina remota via `ssh`. Lista completa na seção 1 e 2 de
+e encadeamentos (`&&`, `;`, `|`). Variáveis definidas na mesma linha
+(`F=--force; git push $F`) são resolvidas, e o conteúdo de scripts, Makefiles
+e programas em outras linguagens que o comando executa (`./deploy.sh`,
+`make deploy`, `python3 deploy.py`, `python3 -c "..."`) é lido e julgado.
+Ainda assim, exigindo esforço deliberado, escapam: variável definida fora da
+linha ou saída de comando (`git push "$(echo --force)"`), aliases e funções do
+shell, comando montado em variável dentro de um script e comando rodado numa
+máquina remota via `ssh`. Lista completa na seção 1 e 2 de
 [known-issues.md](doc/known-issues.md).
 
 **Falsos positivos conhecidos**
@@ -214,7 +218,9 @@ tools:
 A detecção é por palavra (`prod`, `production`, `prd`) e pelos padrões
 declarados em `production_patterns`. Um ambiente sem esse nome no comando, na
 pasta, no workspace do terraform ou no `AWS_PROFILE` não é reconhecido —
-declare os nomes reais do seu ambiente. Variáveis de ambiente e kubeconfig são
+declare os nomes reais do seu ambiente, ou ligue `assume_production: true`
+para que tudo que não tenha nome de teste (`dev`, `staging`, `qa`...) valha
+como produção. Variáveis de ambiente e kubeconfig são
 lidos do processo do hook (herdados do Claude Code); algo definido antes, fora
 da mesma linha do comando, não é visto.
 

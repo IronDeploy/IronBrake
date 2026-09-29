@@ -23,11 +23,11 @@ O que **ainda** sai com código 0:
 
 | Comando | Por que escapa |
 |---|---|
-| `F=--force; git push $F`, `git push "$(echo --force)"` | o valor só existe quando o shell roda (variável, saída de comando) |
+| `git push $F` com `F=--force` definida em **outra** chamada do shell | o valor só existe quando o shell roda. Variável definida na mesma linha (`F=--force; git push $F`, `export`) é resolvida. Um `git push` com variável ou saída de comando que a linha não define (`$F`, `$OPTS`, `"$(echo --force)"`) é **ask**, salvo variável com nome de branch/remoto/tag (`$BRANCH`, `$REMOTE`) ou `$(git branch --show-current)`. Um comando cujo programa é variável (`$RM -rf x`) também é ask. O que escapa: uma variável com nome de branch que guarda `--force` de propósito |
 | `alias p="git push --force"; p` | alias e funções do shell |
 | `git -c remote.origin.push=+refs/heads/main push` | o force vem de uma configuração, não do comando |
-| `make deploy`, `./deploy.sh` | o comando está dentro de outro arquivo |
-| `python3 -c "os.system('git push --force')"` | outra linguagem executa o comando |
+| script que monta o comando em variável, `make` com receita gerada por variável (`$(CMD)`), script fora do limite (3 níveis) ou maior que 4 MB | o conteúdo de `./x.sh`, `bash x.sh`, `source x.sh`, `python3 x.py`, `node x.js`, `make ALVO` (o Makefile e as dependências do alvo) **é lido** e julgado pelas mesmas regras; variável dentro do script só é vista em um caso: `rm -rf` numa variável sozinha (`$1`, `$DIR/*`) que o script não define e não protege com `set -u` ou `${VAR:?}` é ask |
+| `os.system(cmd)` com `cmd` montado em variável | o código na linha (`python3 -c`, `node -e`...) e em arquivo (`python3 x.py`) é lido: os textos passados a `os.system`, `subprocess`, `execSync`... são julgados como comandos, mas variável não |
 | `ssh prod-host "terraform destroy"` | o comando roda em outra máquina (não é analisado) |
 
 Todos exigem esforço deliberado; a proteção é contra erros e loops, não
@@ -62,10 +62,10 @@ O que **ainda** sai com **código 0**:
 
 | Categoria | Comando | Por que passa |
 |---|---|---|
-| kubernetes | `kubectl delete -f x.yaml` com `kind: Deployment`, `StatefulSet`, `Service`... | de propósito: é o mesmo que `kubectl delete deploy NOME`, que também passa. Só kinds que apagam dados ou em cascata (Namespace, PVC, PV, CRD) são tratados como perigosos |
-| SQL | `DELETE ... WHERE` com condição que só é verdadeira por um cálculo (`WHERE id >= 0`, `WHERE id IS NOT NULL`, `WHERE length(name) >= 0`) | só literais e igualdades óbvias são reconhecidos (`1=1`, `TRUE`, `'a'='a'`, `id=id`, `1<>0`, `OR` com qualquer um deles) |
-| arquivos | `rm -rf` em caminho absoluto fora da lista crítica (`/data/prod`) | não é catastrófico universal; cai no ambiente só se casar com `production_patterns` |
-| nuvem | exclusão via SDK ou HTTP direto (sem a CLI) | não aparece como comando de CLI reconhecido |
+| kubernetes | `kubectl delete deploy NOME` e `kubectl delete -f` com `kind: Deployment`/`StatefulSet`/`DaemonSet`/`Service`/`Ingress` **fora de produção**; `kubectl delete pod`, `configmap`, `secret`, `job` em qualquer ambiente | de propósito: não perdem dados (um `apply` recria) e são o dia a dia de um deploy. **Em produção** os cinco tipos acima são **ask** (nunca deny), porque tiram o serviço do ar. Pod fica de fora: apagar pod é como se reinicia. Só Namespace, PVC, PV e CRD (apagam dados ou em cascata) são bloqueados também fora de produção |
+| SQL | `DELETE ... WHERE` cuja condição só é verdadeira para toda linha por causa dos dados (`WHERE age > 0`, `WHERE coalesce(x, 0) >= 0`); e, **fora de produção**, `WHERE deleted_at IS NOT NULL` / `status <> 'x'` (em produção, um filtro assim sozinho é ask) | são reconhecidos os literais e igualdades óbvias (`1=1`, `TRUE`, `id=id`, `1<>0`), `coluna >= 0` e `> -1` em qualquer coluna, filtros em colunas-chave (`id`, `uuid`, `pk`, `*_id`: `> 0`, `IS NOT NULL`, `LIKE '%'`, `< 2147483647`) e `LENGTH/ABS(...) >= 0`. Sem o esquema do banco não dá para saber quantas linhas um filtro amplo pega. Como `deleted_at IS NOT NULL` é uma limpeza comum, só pergunta em produção, e só quando é o único filtro (com `AND created_at < ...` ou `id = 5` junto, passa) |
+| arquivos | `rm -rf` dentro da pasta do projeto, mesmo que o nome tenha `prod`; apagar por outros meios (`unlink`, `find -delete` com filtro) | o `rm -rf` fora da pasta do projeto e das pastas temporárias (`/tmp`, `/var/folders`, `$TMPDIR`) é ask, e deny em produção (`/data/prod` já conta como produção pelo nome). `rm -rf $DIR/x` com variável que a linha não define é ask |
+| nuvem | exclusão via SDK montada em variável ou vinda de outro arquivo que o script importa; API chamada por outro cliente que não seja `curl`/`wget` | é lido o código escrito na linha (`python3 -c`, heredoc, pipe) e o arquivo executado (`python3 deploy.py`): `.delete_*`, `.terminate_*`, `requests.delete(`, `method: 'DELETE'`, `shutil.rmtree`, `fs.rmSync`, `DROP`/`DELETE` sem filtro dentro de textos. `curl`/`wget` com `-X DELETE`, `Action=Delete*/Terminate*`, `X-Amz-Target: ...Delete*` ou `X-HTTP-Method-Override: DELETE` |
 
 O `terragrunt apply` segue a mesma regra do terraform ("sem plano, sem apply"): o
 plano é lido com `terragrunt show -json PLANO` (também `run-all` e `run --all --`,
@@ -140,7 +140,17 @@ travamento usa 1 s. Depois disso, 5 rodadas completas sem falha.
 
 - **Só por nomes.** Se o cluster de produção se chama `cluster-a` e a conta
   AWS `empresa`, nada indica produção: tudo vira ask. Declare os nomes em
-  `production_patterns`.
+  `production_patterns`, ou ligue `assume_production: true` no
+  `.iron/policy.yaml` (modo estrito, abaixo).
+- **Modo estrito (`assume_production: true`):** o cluster do kubectl, o
+  `AWS_PROFILE`, o workspace do terraform e o projeto do gcloud precisam ter um
+  nome de teste reconhecido (`dev`, `staging`, `test`, `qa`, `sandbox`,
+  `local`, `minikube`, `docker-desktop`, `kind`, `demo`, `hml`... a lista é fixa
+  no código, para o arquivo não poder afrouxá-la); se **algum** não tiver,
+  vale como produção (`cluster-a` vira deny). Sem nenhum contexto de nuvem
+  (`git push`), não muda nada. Custo: `default` e nomes como `empresa` viram
+  produção, então quem liga o modo precisa nomear os ambientes de teste.
+  Só soma, como o resto do arquivo.
 - **Contexto de onde o hook roda:** as variáveis de ambiente e o kubeconfig
   lidos são os do processo do hook (herdados do Claude Code). Um
   `export AWS_PROFILE=prod` feito antes, no shell do agente, não é visto — a
@@ -171,13 +181,19 @@ travamento usa 1 s. Depois disso, 5 rodadas completas sem falha.
 - **Evento sem `session_id`:** a memória não roda (não há onde guardar).
 - **Windows não testado:** a trava lá usa o arquivo aberto sem
   compartilhamento; compila, mas nunca rodou num Windows.
-- **"Muito parecido" ignora números:** além de espaços, aspas, barras
-  invertidas e maiúsculas, cada sequência de dígitos vale igual. `terraform
-  apply plan1`, `plan2` e `plan-20260929-1030` contam como o mesmo comando.
-  Efeito colateral: comandos legítimos que só mudam o número também se somam
-  (`kubectl delete pod web-1`, `web-2`, `web-3` em 5 minutos → ask). Ainda não
-  vale para nomes sem número (`plan-a`, `plan-b`) nem para ordem de opções
-  (`-auto-approve -input=false` ≠ `-input=false -auto-approve`).
+- **"Muito parecido" ignora números, nomes de arquivo e ordem das opções:**
+  além de espaços, aspas, barras invertidas e maiúsculas, cada sequência de
+  dígitos vale igual; o argumento do `terraform apply` (o plano) vale igual
+  qualquer que seja o nome (`plan1`, `plan-a`, `outro.tfplan`); qualquer
+  argumento que termine em `.tfplan`, `.yaml`, `.json`, `.sql`, `.tf`... vale
+  igual (`kubectl delete -f a.yaml` e `b.yaml`, `-out=a.tfplan` e `b.tfplan`); e
+  as opções são comparadas em ordem alfabética (`-auto-approve -input=false`
+  = `-input=false -auto-approve`). Efeito colateral: comandos legítimos que só
+  mudam o número ou o arquivo também se somam (`kubectl delete pod web-1`,
+  `web-2`, `web-3` em 5 minutos → ask). **Não vale** para nomes sem número em
+  outros comandos (`kubectl delete pod web-a`, `web-b` seguem diferentes; de
+  propósito, para não juntar recursos distintos) nem para opção com valor
+  separado (`-n prod` e `-n dev` continuam diferentes).
 - **Hash de segredo curto:** o hash com sal impede tabelas prontas e liga o
   hash a uma sessão só, mas quem tem o arquivo (que já é `0600`) e sabe o
   formato do comando pode testar senhas fracas uma a uma.
@@ -260,10 +276,18 @@ Decisões tomadas depois da revisão:
   corrompido, não release adulterada. A conferência contra adulteração é o
   atestado de proveniência (`gh attestation verify`, ou
   `IRON_VERIFY_ATTESTATION=1` no instalador; ver [release.md](release.md)).
-  **Pendente de verificar:** o passo de atestado foi acrescentado ao fluxo,
-  mas ainda não rodou numa tag real nem foi conferido com o `gh` de verdade.
-  Enquanto isso não acontecer na próxima release, não conte com ele. O
-  instalador **não** exige o atestado por padrão (o `gh` não vem instalado).
+  **Verificado em 2026-09-29 (`v0.1.1`):** o `gh attestation verify` (gh 2.101.0,
+  com `--signer-workflow` e `--source-ref refs/tags/v0.1.1`) passou para os 6
+  binários, o `install.sh` e o `SHA256SUMS`; o `shasum -c` também. O
+  `IRON_VERIFY_ATTESTATION=1` do instalador foi testado no macOS arm64, em
+  diretório temporário: instalou a release real; recusou, sem instalar nada,
+  um binário adulterado cujo `SHA256SUMS` foi ajustado junto (o hash passa, o
+  atestado não); e, **sem** a variável, instalou esse mesmo binário adulterado
+  (é o limite descrito acima). Não testado: o instalador no Linux e o caso de
+  `gh` ausente. O instalador **não** exige o atestado por padrão (o `gh` não
+  vem instalado). O `gh` precisa de login por OAuth: um fine-grained PAT com
+  validade acima de 366 dias é recusado (HTTP 403) por organizações que
+  limitam isso.
 - **Fluxo de release verificado em 2026-09-28:** a tag `v0.1.0` rodou o
   `.github/workflows/release.yml` de ponta a ponta — `test` e `release`
   concluíram com sucesso, com os 6 binários, o `install.sh` e o

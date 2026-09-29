@@ -18,8 +18,8 @@ func TestNormalizeSameCommand(t *testing.T) {
 		`terraform apply plan10`,
 		`terraform apply "PLAN1"`,
 	}
-	for _, command := range []string{`terraform apply plan-20260929-1030`, `terraform apply plan-1-2`} {
-		if got, want := Normalize(command), "terraform apply plan-#-#"; got != want {
+	for _, command := range []string{`terraform apply plan-20260929-1030`, `terraform apply plan-1-2`, `terraform apply plan-a`} {
+		if got, want := Normalize(command), "terraform apply <plan>"; got != want {
 			t.Errorf("%q: esperava %q, obtive %q", command, want, got)
 		}
 	}
@@ -38,10 +38,53 @@ func TestNormalizeSameCommand(t *testing.T) {
 	}
 }
 
+// O agente em loop troca o nome do plano (mesmo sem número) ou a ordem das opções.
+func TestNormalizeNamesAndOptionOrder(t *testing.T) {
+	groups := [][]string{
+		{`terraform apply plan-a`, `terraform apply plan-b`, `terraform apply outro.tfplan`, `terraform apply /tmp/x/novo.tfplan`},
+		{`terraform apply -auto-approve -input=false tfplan`, `terraform apply -input=false -auto-approve tfplan`, `terraform apply -input=false tfplan -auto-approve`},
+		{`terraform plan -out=a.tfplan`, `terraform plan -out=b.tfplan`},
+		{`terraform -chdir=infra apply plan-x`, `terraform -chdir=infra apply plan-y`},
+		{`kubectl delete -f a.yaml`, `kubectl delete -f b.yaml`},
+		{`kubectl delete pod web --force --grace-period=0`, `kubectl delete pod web --grace-period=0 --force`},
+	}
+	for _, group := range groups {
+		want := Normalize(group[0])
+		for _, command := range group[1:] {
+			if got := Normalize(command); got != want {
+				t.Errorf("%q: esperava %q, obtive %q", command, want, got)
+			}
+		}
+	}
+}
+
+func TestNormalizeKeepsRealDifferences(t *testing.T) {
+	different := []string{
+		`terraform apply tfplan`,
+		`terraform apply -target=aws_instance.web tfplan`,
+		`terraform apply -target=aws_instance.db tfplan`,
+		`terraform -chdir=infra apply tfplan`,
+		`terraform -chdir=other apply tfplan`,
+		`terraform destroy`,
+		`terraform plan tfplan`,
+		`kubectl delete pod web`,
+		`kubectl delete pod db`,
+		`kubectl delete pod web -n prod`,
+		`kubectl delete pod web -n dev`,
+	}
+	seen := map[string]string{}
+	for _, command := range different {
+		n := Normalize(command)
+		if other, ok := seen[n]; ok {
+			t.Errorf("%q e %q não deveriam normalizar igual (%q)", command, other, n)
+		}
+		seen[n] = command
+	}
+}
+
 func TestNormalizeDifferentCommands(t *testing.T) {
 	different := []string{
 		`terraform apply tfplan`,
-		`terraform apply outro.tfplan`,
 		`terraform apply -target=aws_instance.web tfplan`,
 		`terraform destroy`,
 		`terraform apply plan1 && terraform apply plan2`,

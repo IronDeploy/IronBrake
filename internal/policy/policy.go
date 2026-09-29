@@ -21,6 +21,11 @@ type Policy struct {
 	ProductionPatterns    []string `yaml:"production_patterns"`
 	CriticalResourceTypes []string `yaml:"critical_resource_types"`
 	AuditLog              AuditLog `yaml:"audit_log"`
+
+	// AssumeProduction faz o ambiente de nuvem (cluster, perfil AWS, workspace)
+	// sem nome reconhecido de teste valer como produção. Só soma: liga mais
+	// bloqueios, nunca menos.
+	AssumeProduction bool `yaml:"assume_production"`
 }
 
 // AuditLog personaliza a rotação do log de auditoria. Zero (ou ausente) é o
@@ -72,6 +77,7 @@ func Load(dir string) (Policy, error) {
 	p.ProductionPatterns = append(p.ProductionPatterns, extra.ProductionPatterns...)
 	p.CriticalResourceTypes = append(p.CriticalResourceTypes, extra.CriticalResourceTypes...)
 	p.AuditLog = extra.AuditLog
+	p.AssumeProduction = extra.AssumeProduction
 	return p, nil
 }
 
@@ -118,6 +124,41 @@ func (p Policy) IsProduction(texts ...string) bool {
 			}) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// nonProductionWords são os nomes que dizem "isto não é produção". Fixos no
+// código: se o arquivo pudesse acrescentar palavras, um projeto de terceiros
+// (ou um agente que o edita) afrouxaria o assume_production.
+var nonProductionWords = []string{
+	"dev", "development", "devel", "staging", "stage", "stg", "test", "testing", "teste", "qa", "uat",
+	"sandbox", "local", "localhost", "minikube", "kind", "k3d", "docker", "desktop", "lab", "demo",
+	"preview", "ci", "hml", "homolog", "homologacao", "sbx",
+}
+
+// AssumesProduction: com assume_production ligado, diz se algum item do
+// contexto de nuvem (cluster, perfil, workspace, projeto) não é reconhecido
+// como teste. cluster-a não tem nome de teste nem de produção, então vale
+// como produção. Sem nenhum item de nuvem (git push, por exemplo), não vale.
+func (p Policy) AssumesProduction(cloud []string) bool {
+	if !p.AssumeProduction {
+		return false
+	}
+	for _, item := range cloud {
+		if strings.TrimSpace(item) == "" {
+			continue
+		}
+		recognized := false
+		for _, word := range strings.FieldsFunc(strings.ToLower(item), isNotLetter) {
+			if slices.Contains(nonProductionWords, word) {
+				recognized = true
+				break
+			}
+		}
+		if !recognized {
+			return true
 		}
 	}
 	return false

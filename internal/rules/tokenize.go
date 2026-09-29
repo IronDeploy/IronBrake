@@ -19,13 +19,16 @@ func splitCommands(command string) [][]string {
 
 func split(command string, depth int) [][]string {
 	var result [][]string
+	vars := map[string]string{} // VAR=valor escritos antes, na mesma linha
 	for _, c := range lex(command) {
 		if depth < maxNesting {
 			for _, sub := range c.substitutions {
 				result = append(result, split(sub, depth+1)...)
 			}
 		}
-		result = append(result, expand(c.tokens, depth)...)
+		tokens := substituteVars(c.tokens, vars)
+		recordAssignments(tokens, vars)
+		result = append(result, expand(tokens, depth)...)
 	}
 	return result
 }
@@ -281,6 +284,16 @@ func expand(tokens []string, depth int) [][]string {
 	if depth < maxNesting {
 		if script, ok := innerScript(tokens); ok {
 			return split(script, depth+1)
+		}
+		// python -c, node -e...: o comando pode continuar valendo como
+		// interpretador (para a regra de SDK), e o que o código roda no shell
+		// (os.system, subprocess) é julgado como comando de verdade.
+		if code, ok := inlineCode(tokens); ok {
+			result := [][]string{tokens}
+			for _, command := range shellOuts(code) {
+				result = append(result, split(command, depth+1)...)
+			}
+			return result
 		}
 	}
 	return [][]string{tokens}

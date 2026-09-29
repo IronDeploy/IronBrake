@@ -170,3 +170,28 @@ func TestGitDiscard(t *testing.T) {
 		{`echo git clean -fd`, hook.Allow, hook.Allow},
 	})
 }
+
+func TestGitPushVariable(t *testing.T) {
+	runRuleCases(t, gitPushVar, []ruleCase{
+		// Variável que a linha não define e que pode esconder --force.
+		{`git push $F`, hook.Ask, hook.Ask},
+		{`git push origin main $FLAGS`, hook.Ask, hook.Ask},
+		{`git push ${OPTS} origin main`, hook.Ask, hook.Ask},
+		{`git push origin +$BRANCH`, hook.Ask, hook.Ask},
+		{`git push origin "$(echo --force)"`, hook.Ask, hook.Ask},
+		{`git push origin $(cat flags.txt)`, hook.Ask, hook.Ask},
+
+		// Uso normal: branch, remoto, tag e comando git de leitura.
+		{`git push origin $BRANCH`, hook.Allow, hook.Allow},
+		{`git push $REMOTE $BRANCH`, hook.Allow, hook.Allow},
+		{`git push origin "$CURRENT_BRANCH"`, hook.Allow, hook.Allow},
+		{`git push origin refs/heads/$BRANCH`, hook.Allow, hook.Allow},
+		{`git push origin $TAG_NAME`, hook.Allow, hook.Allow},
+		{`git push -u origin $(git branch --show-current)`, hook.Allow, hook.Allow},
+		{`git push origin HEAD`, hook.Allow, hook.Allow},
+		{`git pull origin $F`, hook.Allow, hook.Allow},
+		{`git push origin main`, hook.Allow, hook.Allow},
+		// Variável definida na mesma linha é resolvida (e o force push, barrado à parte).
+		{`F=-u; git push $F origin main`, hook.Allow, hook.Allow},
+	})
+}

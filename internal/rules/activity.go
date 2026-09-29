@@ -12,19 +12,66 @@ var infraPrograms = []string{
 }
 
 // Normalize devolve a forma canônica da linha, para comparar repetições:
-// sem diferença de espaços, aspas, barras e maiúsculas, e com cada sequência
-// de dígitos trocada por "#". Assim terraform apply plan1 e plan2 (ou
-// plan-20260929-1030) contam como o mesmo comando; um agente em loop costuma
-// só trocar o número do arquivo.
+// sem diferença de espaços, aspas, barras e maiúsculas; com as opções em
+// ordem alfabética; com cada sequência de dígitos trocada por "#"; e com o
+// nome de arquivo trocado por um marcador (o plano do terraform apply, e
+// qualquer argumento que termine em .tfplan, .yaml, .json, .sql...). Assim
+// terraform apply plan1, plan2 e plan-a contam como o mesmo comando: um
+// agente em loop costuma só trocar o nome do arquivo.
 func Normalize(command string) string {
 	var parts []string
 	for _, tokens := range splitCommands(command) {
-		parts = append(parts, strings.Join(tokens, " "))
+		parts = append(parts, normalizeTokens(tokens))
 	}
 	return digitRun.ReplaceAllString(strings.ToLower(strings.Join(parts, " ; ")), "#")
 }
 
-var digitRun = regexp.MustCompile(`[0-9]+`)
+var (
+	digitRun = regexp.MustCompile(`[0-9]+`)
+	// fileLike: argumento que é o nome de um arquivo de plano, manifesto ou script.
+	fileLike = regexp.MustCompile(`(?i)\.(?:tfplan|plan|ya?ml|json|sql|tf|tfvars|hcl|sh|txt)$`)
+)
+
+func normalizeTokens(tokens []string) string {
+	sub, _, _ := terraformSubcommand(tokens)
+	var flags, rest []string
+	afterDoubleDash, seenSub := false, false
+	for _, t := range tokens[1:] {
+		switch {
+		case afterDoubleDash:
+			rest = append(rest, normalizeFile(t))
+		case t == "--":
+			afterDoubleDash = true
+			rest = append(rest, t)
+		case strings.HasPrefix(t, "-") && t != "-":
+			flags = append(flags, normalizeFlag(t))
+		case sub == "apply" && seenSub: // o argumento do apply é o plano
+			rest = append(rest, "<plan>")
+		default:
+			if t == sub {
+				seenSub = true
+			}
+			rest = append(rest, normalizeFile(t))
+		}
+	}
+	slices.Sort(flags)
+	return strings.Join(append(append([]string{tokens[0]}, rest...), flags...), " ")
+}
+
+func normalizeFile(t string) string {
+	if fileLike.MatchString(t) {
+		return "<file>"
+	}
+	return t
+}
+
+// normalizeFlag troca o valor colado (-out=x.tfplan, --filename=a.yaml).
+func normalizeFlag(t string) string {
+	if flag, value, found := strings.Cut(t, "="); found && fileLike.MatchString(value) {
+		return flag + "=<file>"
+	}
+	return t
+}
 
 // TouchesInfra diz se algum comando da linha mexe em infraestrutura.
 func TouchesInfra(command string) bool {

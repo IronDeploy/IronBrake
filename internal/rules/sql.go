@@ -3,13 +3,16 @@ package rules
 import (
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/IronDeploy/IronBrake/internal/hook"
 )
 
-const sqlDestructiveDanger = "SQL destrutivo (DROP DATABASE/SCHEMA/TABLE, TRUNCATE ou DELETE sem WHERE, ou com WHERE sempre verdadeiro, como 1=1)."
+const sqlDestructiveDanger = "SQL destrutivo (DROP DATABASE/SCHEMA/TABLE, TRUNCATE ou DELETE sem WHERE, ou com WHERE sempre verdadeiro, como 1=1 ou id >= 0)."
+
+const sqlBroadDeleteDanger = "DELETE em produção com um filtro amplo (col IS NOT NULL, col <> 'x'): sem o esquema do banco não dá para saber quantas linhas serão apagadas; confira com um SELECT COUNT(*) antes."
 
 // Sem um cliente SQL na linha, SQL é só texto (grep, mensagem de commit).
 var sqlClients = []string{
@@ -30,10 +33,12 @@ func (sqlRule) Check(commands [][]string, env Env) (hook.Decision, string) {
 		return hook.Allow, ""
 	}
 	// SQL escrito na própria linha (-c, heredoc, echo ... | psql).
+	broad := false
 	for _, text := range sqlCandidates(commands) {
 		if hasDestructiveSQL(text) {
 			return decideByEnvironment(sqlDestructiveDanger, commands, env)
 		}
+		broad = broad || hasBroadDelete(text)
 	}
 	// SQL num arquivo: psql -f arquivo.sql, ou qualquer cliente com < arquivo.sql.
 	unreadable := false
@@ -51,7 +56,11 @@ func (sqlRule) Check(commands [][]string, env Env) (hook.Decision, string) {
 			if hasDestructiveSQL(string(data)) {
 				return decideByEnvironment(sqlDestructiveDanger, commands, env)
 			}
+			broad = broad || hasBroadDelete(string(data))
 		}
+	}
+	if broad && env.isProduction(commands) {
+		return hook.Ask, "Iron Brake: confirme antes de executar: " + sqlBroadDeleteDanger
 	}
 	if unreadable {
 		return decideUnreadableTarget("um arquivo SQL (-f ou < remoto, stdin ou ilegível)", commands, env)
@@ -177,6 +186,61 @@ var (
 	afterFilter = regexp.MustCompile(`\b(?:RETURNING|ORDER\s+BY|LIMIT)\b`)
 )
 
+// deleteCondition devolve a condição do WHERE de um DELETE (sem RETURNING,
+// ORDER BY e LIMIT), ou ok=false se não houver WHERE.
+func deleteCondition(statement string) (cond string, ok bool) {
+	upper := strings.ToUpper(statement)
+	loc := whereWord.FindStringIndex(upper)
+	if loc == nil {
+		return "", false
+	}
+	cond = upper[loc[1]:]
+	if end := afterFilter.FindStringIndex(cond); end != nil {
+		cond = cond[:end[0]]
+	}
+	return cutAtUnmatchedParen(cond), true
+}
+
+// hasBroadDelete: DELETE cujo WHERE é só um filtro que costuma pegar quase
+// todas as linhas (col IS NOT NULL, col <> 'x'). Sem o esquema do banco não
+// dá para saber; é limpeza rotineira fora de produção, e ask em produção.
+func hasBroadDelete(text string) bool {
+	for _, statement := range strings.Split(stripSQLComments(text), ";") {
+		upper := strings.ToUpper(statement)
+		loc := deleteWord.FindStringIndex(upper)
+		if loc == nil {
+			continue
+		}
+		if cond, ok := deleteCondition(statement[loc[0]:]); ok && broadFilter(cond) {
+			return true
+		}
+	}
+	return false
+}
+
+// broadFilter: algum termo do OR é feito só de filtros amplos ligados por AND.
+func broadFilter(cond string) bool {
+	cond = strings.TrimSpace(cond)
+	for len(cond) > 1 && cond[0] == '(' && matchingParen(cond) == len(cond)-1 {
+		cond = strings.TrimSpace(cond[1 : len(cond)-1])
+	}
+	if cond == "" {
+		return false
+	}
+	if parts := splitTopLevel(cond, "OR"); len(parts) > 1 {
+		return slices.ContainsFunc(parts, broadFilter)
+	}
+	if parts := splitTopLevel(cond, "AND"); len(parts) > 1 {
+		return !slices.ContainsFunc(parts, func(p string) bool { return !broadFilter(p) })
+	}
+	return sqlIsNull.MatchString(cond) || sqlNotEqual.MatchString(cond)
+}
+
+var (
+	sqlIsNull   = regexp.MustCompile(`^` + sqlColumn + `\s+IS\s+(?:NOT\s+)?NULL$`)
+	sqlNotEqual = regexp.MustCompile(`^` + sqlColumn + `\s*(?:<>|!=)\s*(?:'[^']*'|[0-9]+(?:\.[0-9]+)?)$`)
+)
+
 // deletesEverything: o DELETE não tem WHERE, ou o WHERE vale para todas as
 // linhas (WHERE 1=1, WHERE TRUE, WHERE id=1 OR 1=1).
 func deletesEverything(statement string) bool {
@@ -236,7 +300,7 @@ var (
 )
 
 func atomAlwaysTrue(atom string) bool {
-	if sqlTrueLiteral.MatchString(atom) {
+	if sqlTrueLiteral.MatchString(atom) || tautologyOnKey(atom) || sqlNonNegative.MatchString(atom) {
 		return true
 	}
 	m := sqlComparison.FindStringSubmatch(atom)
@@ -251,6 +315,57 @@ func atomAlwaysTrue(atom string) bool {
 		return left == right
 	}
 	return left != right && isSQLLiteral(left) && isSQLLiteral(right)
+}
+
+var (
+	sqlKeyComparison = regexp.MustCompile(`^(` + sqlColumn + `)\s*(>=|>|<=|<)\s*(-?[0-9]+)$`)
+	sqlKeyNotNull    = regexp.MustCompile(`^(` + sqlColumn + `)\s+IS\s+NOT\s+NULL$`)
+	sqlKeyLike       = regexp.MustCompile(`^(` + sqlColumn + `)\s+I?LIKE\s+'%+'$`)
+	// o resultado de LENGTH/ABS nunca é negativo: "LENGTH(name) >= 0" vale para toda linha.
+	sqlNonNegative = regexp.MustCompile(`^(?:LENGTH|CHAR_LENGTH|CHARACTER_LENGTH|OCTET_LENGTH|ABS)\s*\(.*\)\s*>=\s*0$`)
+)
+
+const sqlColumn = `(?:[A-Z_][A-Z0-9_$]*\.)?[A-Z_][A-Z0-9_$]*`
+
+// tautologyOnKey reconhece filtros que valem para todas as linhas quando a
+// coluna é uma chave (id, uuid, *_id): "id >= 0", "id > 0", "id IS NOT NULL",
+// "id LIKE '%'", "id < 2147483647". "coluna >= 0" vale para qualquer coluna.
+// Os outros filtros em coluna comum (deleted_at IS NOT NULL) são limpeza
+// rotineira, então não contam.
+func tautologyOnKey(atom string) bool {
+	if m := sqlKeyComparison.FindStringSubmatch(atom); m != nil {
+		n, err := strconv.ParseInt(m[3], 10, 64)
+		if err != nil {
+			return false
+		}
+		// ">= 0" e "> -1" valem para quase toda coluna numérica (saldo,
+		// contador, idade): quem apaga assim quer apagar tudo.
+		if (m[2] == ">=" && n <= 0) || (m[2] == ">" && n < 0) {
+			return true
+		}
+		if !isKeyColumn(m[1]) {
+			return false
+		}
+		switch m[2] {
+		case ">=":
+			return n <= 1
+		case ">":
+			return n <= 0
+		default: // < e <=: maior que qualquer id real
+			return n >= 1_000_000_000
+		}
+	}
+	for _, re := range []*regexp.Regexp{sqlKeyNotNull, sqlKeyLike} {
+		if m := re.FindStringSubmatch(atom); m != nil && isKeyColumn(m[1]) {
+			return true
+		}
+	}
+	return false
+}
+
+func isKeyColumn(column string) bool {
+	name := column[strings.LastIndexByte(column, '.')+1:]
+	return name == "ID" || name == "UUID" || name == "PK" || strings.HasSuffix(name, "_ID")
 }
 
 var (

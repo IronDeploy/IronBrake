@@ -199,3 +199,45 @@ func TestLoadAuditLogCannotShrinkWhatTheLogKeeps(t *testing.T) {
 		})
 	}
 }
+
+func TestAssumeProduction(t *testing.T) {
+	p := Default()
+	p.AssumeProduction = true
+	cases := []struct {
+		cloud []string
+		want  bool
+	}{
+		{[]string{"cluster-a"}, true},
+		{[]string{"empresa"}, true},
+		{[]string{"staging"}, false},
+		{[]string{"dev-cluster", "qa"}, false},
+		{[]string{"docker-desktop"}, false},
+		{[]string{"minikube"}, false},
+		{[]string{"staging", "cluster-a"}, true}, // um item sem nome reconhecido basta
+		{[]string{"default"}, true},
+		{[]string{"", "  "}, false},
+		{nil, false}, // git push e afins: sem contexto de nuvem
+	}
+	for _, c := range cases {
+		if got := p.AssumesProduction(c.cloud); got != c.want {
+			t.Errorf("%q: esperava %v, obtive %v", c.cloud, c.want, got)
+		}
+	}
+	if Default().AssumesProduction([]string{"cluster-a"}) {
+		t.Error("sem assume_production, cluster-a não é produção")
+	}
+}
+
+func TestLoadAssumeProduction(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".iron"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(Path(dir), []byte("assume_production: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := Load(dir)
+	if err != nil || !p.AssumeProduction {
+		t.Fatalf("esperava assume_production ligado, obtive %+v (%v)", p, err)
+	}
+}

@@ -122,8 +122,14 @@ controles da seção "Segurança do fluxo" (tags protegidas, aprovação humana,
 nenhum agente de IA com escrita). E o atestado só vale se quem confere pede o
 fluxo certo (`--signer-workflow`), não qualquer fluxo do repositório.
 
-**Ainda não verificado de ponta a ponta:** o passo foi acrescentado ao fluxo,
-mas ainda não rodou numa tag real, e a conferência não foi executada com o `gh`
-de verdade (não há `gh` na máquina de desenvolvimento). Na próxima release
-(`v0.1.1`), rode o `gh attestation verify` acima num binário baixado antes de
-contar com isso.
+**Verificado em 2026-09-29 (`v0.1.1`):** o `gh attestation verify` (gh 2.101.0)
+passou para os 6 binários, o `install.sh` e o `SHA256SUMS`, com
+`--signer-workflow` e `--source-ref refs/tags/v0.1.1`. O `IRON_VERIFY_ATTESTATION=1`
+do instalador foi testado no macOS arm64 num diretório temporário: instalou a
+release real e recusou um binário adulterado com o `SHA256SUMS` ajustado junto
+(sem a variável, o mesmo binário foi instalado). Não testado: Linux e o caso de
+`gh` ausente.
+
+Se o `gh` responder `HTTP 403 ... forbids access via a fine-grained personal
+access tokens`, o login está usando um PAT com validade acima de 366 dias.
+Refaça com `gh auth logout && gh auth login` e escolha o navegador (OAuth).

@@ -28,10 +28,68 @@ const (
 )
 
 var (
-	gitForcePush  = commandRule{name: "git-force-push", check: checkGitPush}
-	gitPushDelete = commandRule{name: "git-push-delete", check: checkGitPushDelete}
-	gitDiscard    = dangerRule{name: "git-discard", match: matchGitDiscard}
+	gitForcePush       = commandRule{name: "git-force-push", check: checkGitPush}
+	gitPushDelete      = commandRule{name: "git-push-delete", check: checkGitPushDelete}
+	gitDiscard         = dangerRule{name: "git-discard", match: matchGitDiscard}
+	gitPushVar    Rule = gitPushVarRule{}
 )
+
+const pushVarReason = "Iron Brake: confirme antes de executar: git push com uma variável que a linha não define ($F, $OPTS...). Ela pode conter --force, e o Iron Brake não vê o valor."
+
+// gitPushVarRule: git push com argumento que vem de variável ou de comando e
+// pode esconder --force. Variável com nome de branch, remoto, tag ou ref
+// ($BRANCH, $REMOTE) e o resultado de um comando git ($(git branch
+// --show-current)) são o uso normal e passam. Dentro de scripts lidos de
+// arquivo, o normal é usar variável, então não vale.
+type gitPushVarRule struct{}
+
+func (gitPushVarRule) Name() string { return "git-push-variable" }
+
+func (gitPushVarRule) Check(commands [][]string, env Env) (hook.Decision, string) {
+	if env.inScript {
+		return hook.Allow, ""
+	}
+	for _, tokens := range commands {
+		sub, args := gitSubcommand(tokens)
+		if sub != "push" {
+			continue
+		}
+		for _, arg := range args {
+			if hasUnresolvedVar(arg) && !isPlainRefVar(arg) {
+				return hook.Ask, pushVarReason
+			}
+		}
+	}
+	return hook.Allow, ""
+}
+
+var refVarNames = []string{"branch", "remote", "ref", "tag", "origin", "head", "upstream", "repo", "url", "dest", "target"}
+
+// isPlainRefVar: o argumento só usa variáveis com cara de branch/remoto/tag,
+// ou o resultado de um comando git de leitura. "+$X" é refspec de força.
+func isPlainRefVar(arg string) bool {
+	if strings.HasPrefix(arg, "+") || strings.HasPrefix(arg, "-") {
+		return false
+	}
+	if strings.HasPrefix(arg, "$(git ") || strings.HasPrefix(arg, "`git ") {
+		return !strings.ContainsAny(arg, ";&|") && !strings.Contains(arg, "push")
+	}
+	refs := varRef.FindAllStringSubmatch(arg, -1)
+	if len(refs) == 0 {
+		return false // crase ou $( que não é git
+	}
+	rest := varRef.ReplaceAllString(arg, "")
+	if strings.ContainsAny(rest, "$`") {
+		return false
+	}
+	for _, m := range refs {
+		name := strings.ToLower(m[1] + m[2])
+		if !slices.ContainsFunc(refVarNames, func(n string) bool { return strings.Contains(name, n) }) {
+			return false
+		}
+	}
+	return true
+}
 
 // protectedBranches: apagar uma destas no remoto é sempre bloqueado.
 var protectedBranches = set("main", "master", "production", "prod", "prd", "release", "develop", "trunk")

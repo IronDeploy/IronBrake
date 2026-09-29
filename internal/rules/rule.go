@@ -19,6 +19,12 @@ type Env struct {
 	Cwd      string                            // pasta do comando, para resolver caminhos relativos
 	DataDir  string                            // TF_DATA_DIR ("" = .terraform), para achar o workspace do terraform
 	ReadFile func(path string) ([]byte, error) // lê um arquivo local (safefile); nil = sem leitura
+
+	scriptDepth int  // quantos scripts lidos de arquivo estão aninhados
+	inScript    bool // as regras estão julgando o conteúdo de um script, não o que o agente digitou
+
+	scriptNounset  bool            // o script tem set -u: variável vazia aborta em vez de sumir
+	scriptAssigned map[string]bool // variáveis que o próprio script define (VAR=, for VAR in, read VAR)
 }
 
 // readTargetFile lê um arquivo apontado por um comando (kubectl delete -f,
@@ -45,6 +51,10 @@ func (e Env) isProduction(commands [][]string) bool {
 		return true
 	}
 	if e.Policy.IsProduction(e.Context...) {
+		return true
+	}
+	// runenv.Collect põe a pasta primeiro; o resto é o contexto de nuvem.
+	if len(e.Context) > 1 && e.Policy.AssumesProduction(e.Context[1:]) {
 		return true
 	}
 	for _, tokens := range commands {

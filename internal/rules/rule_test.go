@@ -300,3 +300,28 @@ func TestShellFormsKeepHarmlessCommandsAllowed(t *testing.T) {
 		})
 	}
 }
+
+func TestAssumeProductionInRules(t *testing.T) {
+	strict := policy.Default()
+	strict.AssumeProduction = true
+	unknown := Env{Policy: strict, Context: []string{"/home/ana/loja", "cluster-a"}}
+	known := Env{Policy: strict, Context: []string{"/home/ana/loja", "staging"}}
+	plain := Env{Policy: policy.Default(), Context: []string{"/home/ana/loja", "cluster-a"}}
+	noCloud := Env{Policy: strict, Context: []string{"/home/ana/loja"}}
+
+	command := `kubectl delete pvc data`
+	for _, c := range []struct {
+		name string
+		env  Env
+		want hook.Decision
+	}{
+		{"cluster sem nome reconhecido, modo estrito", unknown, hook.Deny},
+		{"cluster de teste, modo estrito", known, hook.Ask},
+		{"cluster sem nome, sem modo estrito", plain, hook.Ask},
+		{"sem contexto de nuvem, modo estrito", noCloud, hook.Ask},
+	} {
+		if got, _ := CheckAll(command, c.env); got != c.want {
+			t.Errorf("%s: esperava %q, obtive %q", c.name, c.want, got)
+		}
+	}
+}

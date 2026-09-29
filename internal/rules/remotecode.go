@@ -31,6 +31,9 @@ func (remoteCodeRule) Check(commands [][]string, env Env) (hook.Decision, string
 		if hasHTTPDelete(tokens) {
 			return decideByEnvironment(httpDeleteDanger, commands, env)
 		}
+		if hasCloudDeleteAction(tokens) {
+			return decideByEnvironment(cloudAPIDanger, commands, env)
+		}
 	}
 	if downloadsCode(commands) && runsFromStdin(commands) {
 		return decideByEnvironment(pipeToShellDanger, commands, env)

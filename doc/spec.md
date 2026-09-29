@@ -46,6 +46,7 @@ production_patterns:        # só palavras de letras
   - live
 critical_resource_types:
   - google_sql_database_instance
+assume_production: true     # cluster/perfil/workspace sem nome de teste conhecido vale como produção
 audit_log:                  # rotação do log de auditoria (ver abaixo)
   max_size_mb: 20           # de 5 a 100; tamanho de cada arquivo antes de girar (padrão 5)
   keep: 10                  # de 5 a 100; arquivos antigos guardados (padrão 5)
@@ -89,7 +90,7 @@ kubectl (`KUBECONFIG` ou `~/.kube/config`), `AWS_PROFILE`,
 | git (descarte/histórico) | `git.go` | `git reset --hard`; `git clean` com `-f`/`--force` (sem `-n`); `git branch -D` (ou `-d --force`); `git tag -d`; `git stash drop`/`clear`; `git reflog expire`; `git gc --prune=now`/`=all`; `git filter-branch`/`filter-repo`; `git update-ref -d`; `git restore`/`git checkout` que descartam o diretório de trabalho | `git reset --soft`, `git clean -n`, `git branch -d` (sem force), `git gc`, `git gc --prune=never`, `git restore --staged arq`, `git checkout main`, `git checkout -b nova` |
 | terraform (destroy) | `terraform.go` | `terraform destroy`; `terraform apply -destroy` (com ou sem plano); idem para `tofu` | `terraform plan -destroy -out=tfplan` (o apply desse plano passa pela regra do apply) |
 | terraform (state) | `terraform.go` | `terraform state rm`; `terraform taint`; `terraform workspace delete`; `terraform force-unlock`; idem `tofu` | `terraform state list/show`, `terraform untaint`, `terraform workspace list/select` |
-| kubernetes | `kubernetes.go` | `kubectl delete namespace/ns ...`; `kubectl delete ... --all`; `kubectl delete pvc/pv ...`; `kubectl delete -f arq.yaml` com `kind: Namespace`/`PersistentVolumeClaim`/`PersistentVolume`; `kubectl drain`; `kubectl scale --replicas=0`; `kubectl replace --force` | `kubectl get namespaces`, `kubectl delete pod web-1`, `kubectl delete -f` de outro `kind`, `kubectl scale --replicas=3`, `kubectl replace -f`, `kubectl cordon` |
+| kubernetes | `kubernetes.go` | `kubectl delete namespace/ns ...`; `kubectl delete deploy/sts/ds/svc/ingress` e `-f` desses kinds (ask, só em produção); `kubectl delete ... --all`; `kubectl delete pvc/pv ...`; `kubectl delete -f arq.yaml` com `kind: Namespace`/`PersistentVolumeClaim`/`PersistentVolume`; `kubectl drain`; `kubectl scale --replicas=0`; `kubectl replace --force` | `kubectl get namespaces`, `kubectl delete pod web-1`, `kubectl delete -f` de outro `kind` (fora de produção; em produção, Deployment/StatefulSet/DaemonSet/Service/Ingress são ask), `kubectl scale --replicas=3`, `kubectl replace -f`, `kubectl cordon` |
 | helm | `helm.go` | `helm uninstall`/`delete`; `helm rollback` | `helm install`, `helm upgrade`, `helm list`, `helm status`, `helm template` |
 | nuvem (recursos) | `cloud.go` | `aws ... terminate-instances`, `aws ... delete-*`; `az ... delete`/`purge`/`delete-*`; `gcloud ... delete` | `aws s3 ls`, `aws ec2 describe-instances`, `az group list`, `gcloud compute instances list` |
 | nuvem (storage em massa) | `cloud.go` | `aws s3 rm --recursive`; `aws s3 rb --force`; `gcloud storage rm`; `gsutil rm` | `aws s3 rm um-objeto`, `aws s3 sync`, `gcloud storage ls`, `gsutil ls` |
@@ -119,9 +120,11 @@ desenvolvedor; não faz sentido só perguntar. São deny em qualquer ambiente:
 | arquivos (catastrófico) | `filesystem.go` | `rm -r` em caminho crítico (`/`, `/*`, `~`, `$HOME`, dirs de sistema como `/etc`, `/usr`); `rm --no-preserve-root`; `dd of=/dev/DISCO`; `mkfs*`; `wipefs`; `shred` de dispositivo; `chmod`/`chown -R` em caminho de sistema; redirecionar (`>`, `>>`) para `/dev/DISCO` | `rm -rf build`, `rm -rf node_modules`, `dd of=disco.img`, `dd of=/dev/null`, `chmod -R 755 ./scripts`, `echo x > saida.txt`, `echo x > /dev/null` |
 | force push (git) | `git.go` | `git push --force`/`-f`/refspec `+main`/`--mirror` | `git push`, `git push -u`, `git push --follow-tags` |
 
-**Limite conhecido:** o hook só vê a linha de comando. Comando montado em
-variável (`RM=rm; $RM -rf /`) ou chamado via SDK da nuvem passa por dentro;
-a defesa dessa via é o Iron Shield e o privilégio mínimo, não o Brake.
+**Limite conhecido:** o hook vê a linha de comando e lê os arquivos que ela
+manda executar (scripts, Makefile, `python3 x.py`), mas não executa nada. Uma
+variável definida fora da linha (`$RM -rf /` é ask; `git push $F` com `F` do
+ambiente passa) ou montada dentro de um script não é resolvida. A defesa das
+outras vias é o Iron Shield e o privilégio mínimo, não o Brake.
 
 **Terraform apply com plano salvo:** plano que apaga ou substitui algum tipo
 de `critical_resource_types` **em produção** → deny, com o cartão de risco no

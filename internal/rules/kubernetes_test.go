@@ -127,3 +127,61 @@ func TestKubectlDeleteFile(t *testing.T) {
 		})
 	}
 }
+
+func TestKubectlDeleteWorkload(t *testing.T) {
+	files := map[string]string{
+		"/work/deploy.yaml": "kind: Deployment\nmetadata:\n  name: api\n",
+		"/work/sts.yaml":    "apiVersion: apps/v1\nkind: StatefulSet\n",
+		"/work/svc.json":    `{"kind": "Service", "metadata": {"name": "api"}}`,
+		"/work/multi.yaml":  "kind: ConfigMap\n---\nkind: Ingress\n",
+		"/work/cm.yaml":     "kind: ConfigMap\ndata:\n  text: hello\n",
+		"/work/pod.yaml":    "kind: Pod\n",
+	}
+	dev := withFiles(devEnv, files)
+	prod := withFiles(prodEnv, files)
+
+	cases := []struct {
+		command   string
+		dev, prod hook.Decision
+	}{
+		// Só pergunta em produção; nunca bloqueia, e fora dela passa.
+		{`kubectl delete deployment api`, hook.Allow, hook.Ask},
+		{`kubectl delete deploy api`, hook.Allow, hook.Ask},
+		{`kubectl delete deploy/api`, hook.Allow, hook.Ask},
+		{`kubectl -n shop delete deploy api`, hook.Allow, hook.Ask},
+		{`kubectl delete deployments.apps api`, hook.Allow, hook.Ask},
+		{`kubectl delete statefulset db`, hook.Allow, hook.Ask},
+		{`kubectl delete sts db`, hook.Allow, hook.Ask},
+		{`kubectl delete daemonset agent`, hook.Allow, hook.Ask},
+		{`kubectl delete svc api`, hook.Allow, hook.Ask},
+		{`kubectl delete ingress web`, hook.Allow, hook.Ask},
+		{`kubectl delete pod web-1 deploy/api`, hook.Allow, hook.Ask}, // TIPO/NOME depois do primeiro
+		{`kubectl delete -f deploy.yaml`, hook.Allow, hook.Ask},
+		{`kubectl delete -f sts.yaml`, hook.Allow, hook.Ask},
+		{`kubectl delete -f svc.json`, hook.Allow, hook.Ask},
+		{`kubectl delete -f multi.yaml`, hook.Allow, hook.Ask}, // Ingress no 2º documento
+
+		// O que segue passando.
+		{`kubectl delete pod web-1`, hook.Allow, hook.Allow},
+		{`kubectl delete pod svc`, hook.Allow, hook.Allow}, // pod chamado "svc"
+		{`kubectl delete configmap app`, hook.Allow, hook.Allow},
+		{`kubectl delete secret x`, hook.Allow, hook.Allow},
+		{`kubectl delete job migrate`, hook.Allow, hook.Allow},
+		{`kubectl delete -f cm.yaml`, hook.Allow, hook.Allow},
+		{`kubectl delete -f pod.yaml`, hook.Allow, hook.Allow},
+		{`kubectl get deploy api`, hook.Allow, hook.Allow},
+		{`kubectl rollout restart deploy/api`, hook.Allow, hook.Allow},
+		{`kubectl apply -f deploy.yaml`, hook.Allow, hook.Allow},
+		{`kubectl scale deploy api --replicas=3`, hook.Allow, hook.Allow},
+	}
+	for _, c := range cases {
+		t.Run(c.command, func(t *testing.T) {
+			if got, r := checkRule(kubectlDeleteWorkload, c.command, dev); got != c.dev {
+				t.Errorf("fora de produção: esperava %q, obtive %q (%q)", c.dev, got, r)
+			}
+			if got, r := checkRule(kubectlDeleteWorkload, c.command, prod); got != c.prod {
+				t.Errorf("produção: esperava %q, obtive %q (%q)", c.prod, got, r)
+			}
+		})
+	}
+}
