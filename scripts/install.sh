@@ -9,6 +9,10 @@
 #   IRON_VERSION=v0.1.0         instala uma versão específica (padrão: a mais recente)
 #   IRON_INSTALL_DIR=/pasta     onde instalar (padrão: ~/.local/bin)
 #   IRON_BASE_URL=http://...    baixa de outro lugar (para testar sem o GitHub)
+#   IRON_VERIFY_ATTESTATION=1   exige a verificação do atestado de proveniência
+#                               (precisa do gh, GitHub CLI, com login). Sem isso,
+#                               o instalador só confere o SHA256SUMS, que vem da
+#                               mesma release e não pega uma release adulterada.
 
 set -eu
 
@@ -62,6 +66,19 @@ else
 fi
 [ "$actual" = "$expected" ] || fail "o hash não confere (esperado $expected, obtido $actual). Nada foi instalado."
 echo "iron: hash SHA-256 conferido"
+
+# Atestado de proveniência: assinado pelo GitHub, fora da release. Prova que o
+# arquivo foi gerado pelo fluxo de release deste repositório (o SHA256SUMS não
+# prova, porque quem troca o binário troca o SHA256SUMS junto).
+if [ "${IRON_VERIFY_ATTESTATION:-}" = "1" ]; then
+	command -v gh >/dev/null 2>&1 || fail "IRON_VERIFY_ATTESTATION=1 precisa do gh (https://cli.github.com). Nada foi instalado."
+	gh attestation verify "$tmp/$file" --repo "$REPO" \
+		--signer-workflow "$REPO/.github/workflows/release.yml" >/dev/null 2>&1 ||
+		fail "o atestado de proveniência não confere (ou o gh não está logado: gh auth login). Nada foi instalado."
+	echo "iron: atestado de proveniência conferido (gerado pelo fluxo de release de $REPO)"
+else
+	echo "iron: dica: para conferir também que o binário saiu do fluxo de release, use IRON_VERIFY_ATTESTATION=1 (precisa do gh)"
+fi
 
 mkdir -p "$INSTALL_DIR"
 chmod 0755 "$tmp/$file"

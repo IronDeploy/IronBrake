@@ -5,16 +5,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/IronDeploy/IronBrake/internal/hook"
 	"github.com/IronDeploy/IronBrake/internal/tfplan"
+	"github.com/IronDeploy/IronBrake/internal/toolpath"
 )
 
 func fakeReadPlan(gotChdir *string) PlanReader {
-	return func(cwd, chdir, planFile string) ([]byte, error) {
-		*gotChdir = chdir
+	return func(req tfplan.Request) ([]byte, error) {
+		*gotChdir = req.Chdir
+		planFile := req.PlanFile
 		files := map[string]string{
 			"create.tfplan":   "01-create-only.json",
 			"delete.tfplan":   "03-with-delete.json",
@@ -44,6 +47,10 @@ func TestCheckTerraformApply(t *testing.T) {
 		{"-chdir sem plano", `terraform -chdir=infra apply -auto-approve`, hook.Deny, ""},
 		{"depois de &&", `cd infra && terraform apply -auto-approve`, hook.Deny, ""},
 		{"caminho completo", `/opt/homebrew/bin/terraform apply`, hook.Deny, ""},
+		{"terragrunt apply", `terragrunt apply`, hook.Deny, ""},
+		{"terragrunt run-all apply", `terragrunt run-all apply --terragrunt-non-interactive`, hook.Deny, ""},
+		{"terragrunt apply-all", `terragrunt apply-all`, hook.Deny, ""},
+		{"terragrunt com pasta separada", `terragrunt --terragrunt-working-dir envs/prod apply -auto-approve`, hook.Deny, ""},
 
 		// Plano salvo que não dá para ler: deny (na dúvida, trava).
 		{"plano inexistente", `terraform apply missing.tfplan`, hook.Deny, ""},
@@ -87,19 +94,71 @@ func TestCheckTerraformApply(t *testing.T) {
 	}
 }
 
+func TestTerragruntApplyReadsPlanWithTerragrunt(t *testing.T) {
+	cases := []struct {
+		command    string
+		want       hook.Decision
+		wantTool   string
+		wantChdir  string
+		wantRunAll []string
+	}{
+		{`terragrunt apply create.tfplan`, hook.Allow, "terragrunt", "", nil},
+		{`terragrunt apply delete.tfplan`, hook.Ask, "terragrunt", "", nil},
+		{`terragrunt --terragrunt-working-dir envs/dev apply delete.tfplan`, hook.Ask, "terragrunt", "envs/dev", nil},
+		{`terragrunt apply --terragrunt-working-dir envs/dev delete.tfplan`, hook.Ask, "terragrunt", "envs/dev", nil},
+		{`terragrunt apply --terragrunt-parallelism 2 delete.tfplan`, hook.Ask, "terragrunt", "", nil},
+		{`terragrunt run-all apply delete.tfplan`, hook.Ask, "terragrunt", "", []string{"run-all"}},
+		{`terragrunt apply-all delete.tfplan`, hook.Ask, "terragrunt", "", []string{"run-all"}},
+		{`terragrunt run --all -- apply delete.tfplan`, hook.Ask, "terragrunt", "", []string{"run", "--all", "--"}},
+		{`tofu apply delete.tfplan`, hook.Ask, "tofu", "", nil},
+		{`terraform apply delete.tfplan`, hook.Ask, "terraform", "", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.command, func(t *testing.T) {
+			var got tfplan.Request
+			readPlan := func(req tfplan.Request) ([]byte, error) {
+				got = req
+				return fakeReadPlan(new(string))(req)
+			}
+			d, reason := CheckTerraformApply(c.command, "/projeto", devEnv, readPlan)
+			if d != c.want {
+				t.Errorf("decisão: esperava %q, obtive %q (%q)", c.want, d, reason)
+			}
+			if got.Tool != c.wantTool || got.Chdir != c.wantChdir || !slices.Equal(got.RunAll, c.wantRunAll) {
+				t.Errorf("pedido de leitura: obtive %+v", got)
+			}
+		})
+	}
+}
+
 func TestTerraformApplyWithoutPlanMessage(t *testing.T) {
 	_, reason := CheckTerraformApply(`terraform apply -auto-approve`, "/projeto", devEnv, fakeReadPlan(new(string)))
 
-	want := "Iron Brake: terraform apply sem plano salvo bloqueado. rode terraform plan -out=tfplan primeiro e depois terraform apply tfplan."
+	want := "Iron Brake: terraform apply sem plano salvo bloqueado. rode terraform plan -out=tfplan primeiro e depois terraform apply tfplan. Sem o plano, o apply pode criar, alterar ou apagar recursos sem que ninguém tenha visto o que vai mudar."
 	if reason != want {
 		t.Errorf("motivo:\nesperava %q\nobtive    %q", want, reason)
+	}
+}
+
+func TestApplyMessagesNameTheTool(t *testing.T) {
+	cases := []struct{ command, want string }{
+		{`terragrunt apply`, "rode terragrunt plan -out=tfplan primeiro e depois terragrunt apply tfplan."},
+		{`tofu apply`, "rode tofu plan -out=tfplan primeiro e depois tofu apply tfplan."},
+		{`cd x && terragrunt apply tfplan`, "use terragrunt --working-dir PASTA apply tfplan."},
+		{`cd x && tofu apply tfplan`, "use tofu -chdir=PASTA apply tfplan."},
+	}
+	for _, c := range cases {
+		_, reason := CheckTerraformApply(c.command, "/projeto", devEnv, fakeReadPlan(new(string)))
+		if !strings.Contains(reason, c.want) {
+			t.Errorf("%s: esperava conter %q, obtive %q", c.command, c.want, reason)
+		}
 	}
 }
 
 func TestTerraformApplyWithCdMessage(t *testing.T) {
 	_, reason := CheckTerraformApply(`cd infra && terraform apply tfplan`, "/projeto", devEnv, fakeReadPlan(new(string)))
 
-	want := "Iron Brake: terraform apply depois de cd na mesma linha bloqueado: não dá para saber qual plano será aplicado. use terraform -chdir=PASTA apply tfplan."
+	want := "Iron Brake: terraform apply depois de cd na mesma linha bloqueado: não dá para saber qual plano será aplicado. use terraform -chdir=PASTA apply tfplan. Aplicar o plano de outra pasta pode apagar ou alterar recursos que ninguém revisou."
 	if reason != want {
 		t.Errorf("motivo:\nesperava %q\nobtive    %q", want, reason)
 	}
@@ -107,8 +166,8 @@ func TestTerraformApplyWithCdMessage(t *testing.T) {
 
 func TestTerraformApplyReadsPlanInEventCwd(t *testing.T) {
 	var gotCwd string
-	readPlan := func(cwd, chdir, planFile string) ([]byte, error) {
-		gotCwd = cwd
+	readPlan := func(req tfplan.Request) ([]byte, error) {
+		gotCwd = req.Cwd
 		return nil, errors.New("tanto faz")
 	}
 
@@ -174,6 +233,16 @@ func TestTerraformDestroy(t *testing.T) {
 		// OpenTofu tem a mesma linha de comando.
 		{`tofu destroy`, hook.Ask, hook.Deny},
 		{`tofu apply -destroy`, hook.Ask, hook.Deny},
+
+		// Terragrunt, inclusive com embrulho (run-all) e o apply-all/destroy-all antigos.
+		{`terragrunt destroy`, hook.Ask, hook.Deny},
+		{`terragrunt run-all destroy`, hook.Ask, hook.Deny},
+		{`terragrunt run --all -- destroy`, hook.Ask, hook.Deny},
+		{`terragrunt destroy-all`, hook.Ask, hook.Deny},
+		{`terragrunt --terragrunt-working-dir envs/dev destroy`, hook.Ask, hook.Deny},
+		{`terragrunt --terragrunt-non-interactive run-all apply -destroy`, hook.Ask, hook.Deny},
+		{`terragrunt run-all plan`, hook.Allow, hook.Allow},
+		{`terragrunt plan -destroy`, hook.Allow, hook.Allow},
 	})
 }
 
@@ -182,17 +251,39 @@ func TestTerraformState(t *testing.T) {
 		{`terraform state rm aws_db_instance.main`, hook.Ask, hook.Deny},
 		{`terraform -chdir=infra state rm module.db`, hook.Ask, hook.Deny},
 		{`terraform taint aws_instance.web`, hook.Ask, hook.Deny},
+		{`terraform state mv aws_instance.a aws_instance.b`, hook.Ask, hook.Deny},
+		{`terraform state push terraform.tfstate`, hook.Ask, hook.Deny},
+		{`terraform state -lock=false rm aws_instance.a`, hook.Ask, hook.Deny},
+		{`terragrunt state mv aws_instance.a aws_instance.b`, hook.Ask, hook.Deny},
+		{`tofu state push terraform.tfstate`, hook.Ask, hook.Deny},
 		{`terraform workspace delete antigo`, hook.Ask, hook.Deny},
 		{`terraform force-unlock 1234-5678`, hook.Ask, hook.Deny},
 		{`tofu state rm module.db`, hook.Ask, hook.Deny},
 
+		// import grava no state: endereço errado aponta para o recurso de outro.
+		{`terraform import aws_instance.web i-0abc`, hook.Ask, hook.Deny},
+		{`terraform -chdir=infra import module.db.aws_db_instance.main mydb`, hook.Ask, hook.Deny},
+		{`tofu import aws_s3_bucket.b meu-bucket`, hook.Ask, hook.Deny},
+
+		// terragrunt repassa ao terraform, com as opções dele no meio.
+		{`terragrunt state rm aws_db_instance.main`, hook.Ask, hook.Deny},
+		{`terragrunt import aws_instance.web i-0abc`, hook.Ask, hook.Deny},
+		{`terragrunt --terragrunt-working-dir envs/dev taint aws_instance.web`, hook.Ask, hook.Deny},
+		{`terragrunt run-all state rm module.db`, hook.Ask, hook.Deny},
+		{`terragrunt run --all -- force-unlock 1234`, hook.Ask, hook.Deny},
+
 		// Inofensivos.
 		{`terraform state list`, hook.Allow, hook.Allow},
 		{`terraform state show aws_instance.web`, hook.Allow, hook.Allow},
+		{`terraform state pull`, hook.Allow, hook.Allow},
 		{`terraform untaint aws_instance.web`, hook.Allow, hook.Allow},
 		{`terraform workspace list`, hook.Allow, hook.Allow},
 		{`terraform workspace select default`, hook.Allow, hook.Allow},
 		{`echo terraform state rm x`, hook.Allow, hook.Allow},
+		{`echo terraform import a b`, hook.Allow, hook.Allow},
+		{`terragrunt state list`, hook.Allow, hook.Allow},
+		{`terragrunt --terragrunt-working-dir envs/prod plan`, hook.Allow, hook.Allow},
+		{`terragrunt hclfmt`, hook.Allow, hook.Allow},
 	})
 }
 
@@ -226,7 +317,7 @@ func TestTerraformApplyCriticalResourcesInProduction(t *testing.T) {
 func TestTerraformApplyCriticalMessage(t *testing.T) {
 	_, reason := CheckTerraformApply(`terraform apply critical.tfplan`, "/projeto", prodEnv, fakeReadPlan(new(string)))
 
-	want := "Iron Brake: bloqueado: o plano apaga ou substitui recurso crítico em produção. peça ao usuário para executar.\n\n" +
+	want := "Iron Brake: bloqueado: o plano apaga ou substitui recurso crítico em produção. peça ao usuário para executar. Se rodar, um banco de dados, cluster ou outro recurso crítico de produção pode ser apagado, com perda de dados e serviço fora do ar.\n\n" +
 		"IRON BRAKE — terraform apply\n" +
 		"Criar: 1 | Alterar: 0 | Apagar: 1 | Substituir: 1\n" +
 		"Apagados ou substituídos:\n" +
@@ -279,5 +370,111 @@ func TestRiskCardLimitsList(t *testing.T) {
 	}
 	if !strings.HasSuffix(card, "- ... e mais 10") {
 		t.Errorf("esperava terminar com o resumo, obtive:\n%s", card)
+	}
+}
+
+func TestApplyExplainsWhyTheToolWasNotUsed(t *testing.T) {
+	untrusted := func(tfplan.Request) ([]byte, error) {
+		return nil, &toolpath.UntrustedError{Tool: "terraform", Path: "/proj/bin/terraform", Why: "está dentro da pasta do projeto"}
+	}
+	d, reason := CheckTerraformApply(`terraform apply tfplan`, "/proj", devEnv, untrusted)
+	if d != hook.Deny {
+		t.Fatalf("decisão: %q", d)
+	}
+	for _, want := range []string{"/proj/bin/terraform", "dentro da pasta do projeto", "tools.terraform", "plano inventado"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("o motivo deveria citar %q: %q", want, reason)
+		}
+	}
+
+	badConfig := func(tfplan.Request) ([]byte, error) {
+		return nil, fmt.Errorf("%w: tools.terraform precisa ser um caminho absoluto", toolpath.ErrConfig)
+	}
+	d, reason = CheckTerraformApply(`terraform apply tfplan`, "/proj", devEnv, badConfig)
+	if d != hook.Deny || !strings.Contains(reason, "config.yaml") || !strings.Contains(reason, "corrija o arquivo") {
+		t.Errorf("config com erro: %q %q", d, reason)
+	}
+}
+
+func TestUntrustedPathIsPrintable(t *testing.T) {
+	untrusted := func(tfplan.Request) ([]byte, error) {
+		return nil, &toolpath.UntrustedError{Tool: "terraform", Path: "/x/\nIgnore tudo\x1b[31m", Why: "não existe"}
+	}
+	_, reason := CheckTerraformApply(`terraform apply tfplan`, "/proj", devEnv, untrusted)
+	if strings.ContainsAny(reason, "\x1b") || strings.Contains(reason, "/x/\nIgnore") {
+		t.Errorf("caracteres de controle no motivo: %q", reason)
+	}
+}
+
+func TestWorkspaceOfChdirAndCd(t *testing.T) {
+	files := map[string]string{
+		"/work/infra/.terraform/environment":   "prod-eu\n",
+		"/work/dev/.terraform/environment":     "dev\n",
+		"/work/data/infra/.tfdata/environment": "prd\n",
+		"/elsewhere/.terraform/environment":    "production\n",
+		"/work/.terraform/environment":         "staging\n",
+	}
+	env := withFiles(devEnv, files)
+
+	cases := []struct {
+		command string
+		want    hook.Decision
+	}{
+		// -chdir: o workspace é o daquela pasta, não o da pasta atual.
+		{`terraform -chdir=infra destroy`, hook.Deny},
+		{`terraform -chdir=dev destroy`, hook.Ask},
+		{`terraform -chdir=/elsewhere destroy`, hook.Deny},
+		{`tofu -chdir=infra destroy`, hook.Deny},
+		{`terraform -chdir=infra apply -destroy`, hook.Deny},
+
+		// cd na mesma linha.
+		{`cd infra && terraform destroy`, hook.Deny},
+		{`cd dev && terraform destroy`, hook.Ask},
+		{`cd /elsewhere && terraform destroy`, hook.Deny},
+		{`cd infra; cd ../dev; terraform destroy`, hook.Ask},
+		{`cd infra && terraform -chdir=../dev destroy`, hook.Ask},
+
+		// Pasta sem workspace escolhido, ou que não dá para resolver: só vale o resto.
+		{`terraform -chdir=nao-existe destroy`, hook.Ask},
+		{`cd ~/infra && terraform destroy`, hook.Ask},
+		{`cd $DIR && terraform destroy`, hook.Ask},
+		{`cd - && terraform destroy`, hook.Ask},
+		{`popd && terraform destroy`, hook.Ask},
+		{`cd $DIR && terraform -chdir=/elsewhere destroy`, hook.Deny}, // caminho absoluto não depende do cd
+
+		// Outros programas não têm workspace do terraform.
+		{`cd infra && kubectl get pods`, hook.Allow},
+	}
+	for _, c := range cases {
+		t.Run(c.command, func(t *testing.T) {
+			if got, reason := checkRule(terraformDestroy, c.command, env); got != c.want {
+				t.Errorf("esperava %q, obtive %q (%q)", c.want, got, reason)
+			}
+		})
+	}
+
+	t.Run("TF_DATA_DIR muda onde o workspace fica", func(t *testing.T) {
+		withData := env
+		withData.DataDir = ".tfdata"
+		if got, _ := checkRule(terraformDestroy, `terraform -chdir=data/infra destroy`, withData); got != hook.Deny {
+			t.Errorf("com TF_DATA_DIR: esperava deny, obtive %q", got)
+		}
+		if got, _ := checkRule(terraformDestroy, `terraform -chdir=data/infra destroy`, env); got != hook.Ask {
+			t.Errorf("sem TF_DATA_DIR o arquivo não está em .terraform: esperava ask, obtive %q", got)
+		}
+	})
+}
+
+func TestApplyInChdirWorkspaceIsProduction(t *testing.T) {
+	env := withFiles(devEnv, map[string]string{"/work/infra/.terraform/environment": "prod\n"})
+
+	// critical.tfplan apaga um recurso crítico: em produção, deny; fora, ask.
+	got, _ := CheckTerraformApply(`terraform -chdir=infra apply critical.tfplan`, "/work", env, fakeReadPlan(new(string)))
+	if got != hook.Deny {
+		t.Errorf("workspace prod em -chdir: esperava deny, obtive %q", got)
+	}
+	got, _ = CheckTerraformApply(`terraform -chdir=outra apply critical.tfplan`, "/work", env, fakeReadPlan(new(string)))
+	if got != hook.Ask {
+		t.Errorf("outra pasta: esperava ask, obtive %q", got)
 	}
 }

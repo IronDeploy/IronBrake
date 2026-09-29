@@ -12,8 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/IronDeploy/IronBrake/internal/audit"
 	"github.com/IronDeploy/IronBrake/internal/hook"
 	"github.com/IronDeploy/IronBrake/internal/setup"
+	"github.com/IronDeploy/IronBrake/internal/toolpath"
 )
 
 const testEvent = `{"tool_name":"Bash","tool_input":{"command":"git push --force origin main"}}`
@@ -23,6 +25,8 @@ const (
 	nameBinary   = "o binário do hook existe e é executável"
 	nameResponds = "o hook bloqueia um force push de teste"
 	nameTimeout  = "o timeout do hook dá tempo ao Iron Brake"
+	nameTools    = "os programas que o Iron Brake executa (terraform, tofu, terragrunt) são confiáveis"
+	nameAudit    = "o log de auditoria grava e a corrente está íntegra"
 	nameVersion  = "versão"
 )
 
@@ -55,6 +59,111 @@ func Run(settingsPath, version string, timeout time.Duration) []Result {
 	return []Result{settings, binary, responds, hookTimeout, {Name: nameVersion, OK: true, Detail: version}}
 }
 
+// Extra é o que o RunAll confere além do hook: de onde o Iron Brake executa
+// terraform/tofu/terragrunt e o log de auditoria.
+type Extra struct {
+	Log        audit.Log
+	ConfigPath string // ~/.iron/config.yaml
+	ProjectDir string
+}
+
+// RunAll é Run mais a verificação dos programas e a do log de auditoria, antes
+// da versão. O log vem depois da resposta do hook: o force push de teste faz o
+// hook gravar uma linha, e uma gravação boa apaga o aviso de falha anterior.
+func RunAll(settingsPath, version string, timeout time.Duration, extra Extra) []Result {
+	results := Run(settingsPath, version, timeout)
+	last := len(results) - 1
+	return append(results[:last:last], CheckTools(extra.ConfigPath, extra.ProjectDir), CheckAudit(extra.Log), results[last])
+}
+
+// CheckTools falha se o config.yaml tem erro, se um caminho configurado não
+// serve ou se o programa achado no PATH é suspeito (dentro do projeto ou
+// gravável por qualquer usuário). Programa não instalado não é falha: só
+// importa a quem usa terraform apply.
+func CheckTools(configPath, projectDir string) Result {
+	result := Result{Name: nameTools}
+
+	cfg, err := toolpath.Load(configPath)
+	if err != nil {
+		result.Detail = err.Error()
+		result.Fix = "corrija " + configPath + " (tools.terraform: /caminho/absoluto/terraform) ou apague o arquivo."
+		return result
+	}
+
+	var found, failed []string
+	for _, tool := range toolpath.Tools {
+		path, err := toolpath.Resolve(tool, cfg, projectDir)
+		var untrusted *toolpath.UntrustedError
+		switch {
+		case errors.As(err, &untrusted):
+			failed = append(failed, untrusted.Error())
+		case err != nil:
+			// não instalado
+		default:
+			source := "PATH"
+			if cfg.Tools[tool] != "" {
+				source = "config.yaml"
+			}
+			found = append(found, fmt.Sprintf("%s: %s (%s)", tool, path, source))
+		}
+	}
+
+	switch {
+	case len(failed) > 0:
+		result.Detail = strings.Join(failed, "; ")
+		result.Fix = "instale o programa num caminho só seu, ou informe o caminho absoluto em tools.<programa> no " + configPath + ". Um programa falso mostraria ao Iron Brake um plano inventado."
+	case len(found) == 0:
+		result.OK = true
+		result.Detail = "nenhum instalado (só importa para terraform apply)"
+	default:
+		result.OK = true
+		result.Detail = strings.Join(found, "; ")
+	}
+	return result
+}
+
+// CheckAudit falha se o log não pode ser gravado, se a última gravação do
+// hook falhou ou se a corrente está quebrada. Sem isso, a falha só aparece
+// no stderr do hook, que o Claude Code mostra apenas quando o comando é
+// bloqueado.
+func CheckAudit(log audit.Log) Result {
+	result := Result{Name: nameAudit}
+	h := log.Check()
+	path := log.Path
+
+	switch {
+	case h.WriteErr != nil:
+		result.Detail = fmt.Sprintf("não consigo gravar em %s: %v", path, h.WriteErr)
+		result.Fix = "confira o dono e as permissões da pasta " + filepath.Dir(path) + " (0700, do seu usuário) e o espaço em disco. Enquanto isso, as decisões do Iron Brake não ficam registradas."
+	case h.LastFailure != nil:
+		result.Detail = fmt.Sprintf("a última gravação do hook falhou em %s: %s", h.LastFailure.Time.Format("2006-01-02 15:04:05"), h.LastFailure.Reason)
+		result.Fix = "resolva o motivo acima (o aviso some na próxima gravação que der certo) e rode iron doctor de novo."
+	case !h.Chain.OK && h.Chain.BrokenAt > 0:
+		result.Detail = fmt.Sprintf("a corrente quebrou na linha %d de %s: %s", h.Chain.BrokenAt, h.Chain.File, h.Chain.Reason)
+		result.Fix = "rode iron audit verify para ver o detalhe. Se a alteração foi legítima, mova os arquivos " + filepath.Base(path) + "* para outra pasta e o log recomeça."
+	case !h.Chain.OK:
+		result.Detail = "não consegui verificar o log: " + h.Chain.Reason
+		result.Fix = "rode iron audit verify e rode iron doctor de novo."
+	default:
+		result.OK = true
+		result.Detail = fmt.Sprintf("%s: %d linha(s) em %d arquivo(s), %s", path, h.Chain.Lines, h.Chain.Files, humanSize(h.Chain.Bytes))
+		if h.Chain.Missing {
+			result.Detail = path + ": ainda sem decisões registradas"
+		}
+	}
+	return result
+}
+
+func humanSize(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	}
+	return fmt.Sprintf("%d B", n)
+}
+
 func Print(w io.Writer, results []Result) {
 	failed := 0
 
@@ -77,7 +186,7 @@ func Print(w io.Writer, results []Result) {
 	if failed > 0 {
 		fmt.Fprintf(w, "\n%d de %d verificações falharam.\n", failed, len(results))
 	} else {
-		fmt.Fprintln(w, "\nTudo certo: o hook está instalado e bloqueou o force push de teste.")
+		fmt.Fprintln(w, "\nTudo certo: o hook está instalado, bloqueou o force push de teste e o log de auditoria está gravando.")
 	}
 }
 

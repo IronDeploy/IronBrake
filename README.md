@@ -17,6 +17,21 @@ leia e rode com `sh install.sh`. No Windows, baixe o `iron_windows_amd64.exe`
 (ou `arm64`) da mesma página. Com Go instalado:
 `go install github.com/IronDeploy/IronBrake/cmd/iron@latest`.
 
+O SHA-256 vem da mesma release do binário: pega download corrompido, não uma
+release adulterada. Para conferir que o binário foi gerado pelo fluxo de release
+do repositório (atestado assinado pelo GitHub, fora da release), com o
+[gh](https://cli.github.com) instalado e logado:
+
+```bash
+curl -fsSL https://github.com/IronDeploy/IronBrake/releases/latest/download/install.sh | IRON_VERIFY_ATTESTATION=1 sh
+# ou, num binário já baixado:
+gh attestation verify iron_linux_amd64 --repo IronDeploy/IronBrake \
+  --signer-workflow IronDeploy/IronBrake/.github/workflows/release.yml
+```
+
+Nesse modo, o instalador não instala nada se o atestado não bater. Detalhes e
+limites em [doc/release.md](doc/release.md).
+
 Depois, na pasta do seu projeto:
 
 ```bash
@@ -27,20 +42,29 @@ iron doctor    # confere se está protegendo
 ## Conferir com `iron doctor`
 
 ```
-OK     1/5  settings.json contém o hook do Iron Brake
-OK     2/5  o binário do hook existe e é executável
-OK     3/5  o hook bloqueia um force push de teste
+OK     1/7  settings.json contém o hook do Iron Brake
+OK     2/7  o binário do hook existe e é executável
+OK     3/7  o hook bloqueia um force push de teste
              o force push de teste foi bloqueado (código 2)
-OK     4/5  o timeout do hook dá tempo ao Iron Brake
-OK     5/5  versão
+OK     4/7  o timeout do hook dá tempo ao Iron Brake
+OK     5/7  os programas que o Iron Brake executa (terraform, tofu, terragrunt) são confiáveis
+             terraform: /opt/homebrew/bin/terraform (PATH)
+OK     6/7  o log de auditoria grava e a corrente está íntegra
+             /Users/voce/.iron/audit.log: 42 linha(s) em 1 arquivo(s), 7.8 KB
+OK     7/7  versão
 
-Tudo certo: o hook está instalado e bloqueou o force push de teste.
+Tudo certo: o hook está instalado, bloqueou o force push de teste e o log de auditoria está gravando.
 ```
 
 O teste 3 roda o hook de verdade com um `git push --force` falso: se não sair
 **bloqueado**, o doctor falha e diz como corrigir. O teste 4 confere que um
 `"timeout"` no `settings.json` não é curto demais (um hook que estoura o
-tempo deixa o comando passar).
+tempo deixa o comando passar). O teste 5 falha se o `terraform`, o `tofu` ou o `terragrunt` achado no `PATH` estiver
+dentro do projeto ou puder ser alterado por qualquer usuário (um programa falso
+mostraria ao Iron Brake um plano inventado); para fixar o programa, veja
+`~/.iron/config.yaml` abaixo. O teste 6 falha se o log não puder ser gravado, se
+a última gravação do hook falhou (o aviso no stderr do hook quase nunca chega
+até você) ou se a corrente de hashes estiver quebrada.
 
 ## O que ele bloqueia
 
@@ -79,18 +103,23 @@ tempo deixa o comando passar).
 | mais de 3 applies ou 20 recursos alterados na sessão | pergunta | pergunta |
 
 "Produção" = as palavras `prod`, `production` ou `prd` no comando, na pasta,
-no workspace do terraform, no contexto do kubectl ou em `AWS_PROFILE`. Para
+no workspace do terraform (também o de `-chdir` e o de `cd pasta && ...`), no contexto do kubectl ou em `AWS_PROFILE`. Para
 acrescentar as suas, crie `.iron/policy.yaml`:
 
 ```yaml
 production_patterns: [live]
 critical_resource_types: [google_sql_database_instance]
+audit_log:            # opcional: guardar mais do log de auditoria (de 5 a 100)
+  max_size_mb: 20     # tamanho de cada arquivo antes de girar (padrão 5)
+  keep: 10            # arquivos antigos guardados (padrão 5)
 ```
 
 No macOS, "pergunta" abre uma janela com o motivo e os botões **Cancelar** e
 **Executar**; o Claude espera a sua resposta. Toda decisão fica registrada em
 `~/.iron/audit.log` (sem o comando, só a classe), e `iron audit verify`
-confere se o log foi alterado.
+confere se o log foi alterado. O log gira sozinho (5 MB por arquivo, 5 antigos guardados) sem quebrar a
+corrente, e o `iron doctor` avisa se ele não está gravando. O `audit_log` do
+`policy.yaml` só aumenta essa retenção, nunca reduz.
 
 ## Exemplo: o primeiro bloqueio
 
@@ -137,24 +166,83 @@ caminho do agente. Detalhes e tabela completa em [doc/iron-shield.md](doc/iron-s
 
 ## Limites (leia antes de confiar)
 
-- **Só enxerga comandos de terminal** (a ferramenta Bash do Claude Code).
-  Arquivos editados, chamadas de MCP e APIs não passam por ele.
-- **Não substitui permissões mínimas.** Se o agente usa uma credencial que
-  pode apagar o banco de produção, o banco está em risco: dê ao agente
-  credenciais que **não conseguem** fazer o que ele não deve. O Iron Brake é
-  uma camada a mais, não a principal.
-- **Enxerga através de disfarces de shell:** `sh -c "..."`, `eval`, prefixos
-  (`env`, `sudo`, `nohup`, `timeout`, `xargs`), aspas, `$'\x2d'`, subshells e
-  encadeamentos (`&&`, `;`, `|`) são desmontados e analisados. **Mas:** o
-  comando montado em variável (`$RM -rf /`), scripts e Makefiles não são
-  analisados por dentro.
-- **Não é contra um agente malicioso:** ele protege de erros e loops. Um
-  agente com o seu usuário pode apagar o estado da sessão ou reescrever o log.
-- A janela de confirmação só existe no macOS; no Linux e no Windows, o motivo
-  da pergunta não aparece antes da decisão. O Windows compila, mas não foi
-  testado.
+**Escopo**
 
-A lista completa, com cada caso verificado, está em
+- Só enxerga comandos de terminal (a ferramenta Bash do Claude Code).
+  Arquivos editados, chamadas de MCP e APIs não passam por ele.
+- Não substitui permissões mínimas. Se o agente usa uma credencial que pode
+  apagar o banco de produção, o banco está em risco: a credencial do agente
+  precisa **não conseguir** fazer o que ele não deve. O Iron Brake é uma
+  camada a mais, não a principal.
+
+**O que escapa da análise**
+
+Comandos são desmontados e analisados através de `sh -c`, `eval`, prefixos
+(`env`, `sudo`, `nohup`, `timeout`, `xargs`...), aspas, `$'\x2d'`, subshells
+e encadeamentos (`&&`, `;`, `|`). Ainda assim, exigindo esforço deliberado,
+escapam: comando montado em variável (`F=--force; git push $F`), aliases e
+funções do shell, comando dentro de um script ou Makefile (`./deploy.sh`,
+`make deploy`), execução via outra linguagem (`python3 -c "..."`) e comando
+rodado numa máquina remota via `ssh`. Lista completa na seção 1 e 2 de
+[known-issues.md](doc/known-issues.md).
+
+**Falsos positivos conhecidos**
+
+- `terraform plan -out=x && terraform apply x` na mesma linha é bloqueado — o
+  plano ainda não existe no disco quando o hook analisa. Separe em dois
+  comandos.
+- `cd pasta && terraform apply tfplan` é bloqueado, porque não há garantia de
+  qual pasta o `cd` deixa como atual. Use `terraform -chdir=pasta apply
+  tfplan`.
+
+**Qual `terraform` o Iron Brake executa**
+
+Para ler o plano, o Iron Brake executa `terraform show -json` (ou `tofu`,
+`terragrunt`). Ele recusa o programa do `PATH` que estiver dentro do projeto ou
+que qualquer usuário possa alterar. Para fixar o programa, crie
+`~/.iron/config.yaml` (do usuário, nunca do projeto):
+
+```yaml
+tools:
+  terraform: /opt/homebrew/bin/terraform
+  # tofu: /usr/local/bin/tofu
+  # terragrunt: /opt/homebrew/bin/terragrunt
+```
+
+**Detecção de produção**
+
+A detecção é por palavra (`prod`, `production`, `prd`) e pelos padrões
+declarados em `production_patterns`. Um ambiente sem esse nome no comando, na
+pasta, no workspace do terraform ou no `AWS_PROFILE` não é reconhecido —
+declare os nomes reais do seu ambiente. Variáveis de ambiente e kubeconfig são
+lidos do processo do hook (herdados do Claude Code); algo definido antes, fora
+da mesma linha do comando, não é visto.
+
+**Não é defesa contra quem tenta burlar**
+
+A proteção é contra erros e loops de um agente bem-intencionado, não contra
+alguém — agente ou pessoa — que tenta contornar deliberadamente com o mesmo
+usuário do sistema: é possível apagar o estado da sessão, reescrever o log de
+auditoria recalculando a corrente de hashes, ou editar o `.iron/policy.yaml`
+(o Iron Brake só vê comandos Bash, não a ferramenta de edição de arquivos).
+
+**Plataforma**
+
+A janela de confirmação com o motivo do bloqueio só existe no macOS. No Linux
+e no Windows, a pergunta aparece pelo Claude Code, mas sem mostrar o porquê
+antes da decisão. O Windows compila e passa nos testes automatizados, mas não
+foi validado numa máquina Windows real.
+
+**Latência**
+
+Comandos comuns respondem em poucos milissegundos (p95 abaixo de 5 ms, dez
+vezes abaixo da meta de 50 ms). A exceção é `terraform apply` com plano
+salvo: ler o plano para o cartão de risco leva ~130 ms (p95), porque o
+próprio terraform inicia um processo por provedor para isso — irrelevante
+perto do tempo do apply em si, mas mensurável. Medição completa em
+[doc/latency.md](doc/latency.md).
+
+A lista completa de limites, com cada caso verificado, está em
 [doc/known-issues.md](doc/known-issues.md); o que cada regra faz, em
 [doc/spec.md](doc/spec.md).
 

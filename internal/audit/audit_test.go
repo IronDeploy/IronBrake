@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -225,5 +226,230 @@ func TestAppendAfterVeryLongLine(t *testing.T) {
 
 	if result := log.Verify(); !result.OK || result.Lines != 3 {
 		t.Errorf("esperava cadeia íntegra com 3 linhas, obtive %+v", result)
+	}
+}
+
+// rotatingLog é um log que rotaciona a cada poucas linhas.
+func rotatingLog(t *testing.T, n int) Log {
+	t.Helper()
+	log := Log{Path: filepath.Join(t.TempDir(), ".iron", "audit.log"), MaxSize: 600, Keep: 2}
+	for i := range n {
+		entry := Entry{Time: t0.Add(time.Duration(i) * time.Minute), Session: "s", Class: "kubectl delete", Decision: "deny", Rule: "kubectl-delete"}
+		if err := log.Append(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return log
+}
+
+func TestRotationKeepsChainAcrossFiles(t *testing.T) {
+	log := rotatingLog(t, 6) // ~4 linhas por arquivo: ainda cabe tudo em Path, Path.1 e Path.2
+	if _, err := os.Stat(log.rotated(1)); err != nil {
+		t.Fatalf("esperava %s depois de passar do tamanho: %v", log.rotated(1), err)
+	}
+
+	r := log.Verify()
+	if !r.OK || r.Lines != 6 || r.Files < 2 {
+		t.Errorf("corrente entre arquivos: %+v", r)
+	}
+
+	// A primeira linha do arquivo novo aponta para a última do rotacionado.
+	old, err := os.ReadFile(log.rotated(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldLines := strings.Split(strings.TrimSuffix(string(old), "\n"), "\n")
+	var first Entry
+	if err := json.Unmarshal([]byte(lines(t, log)[0]), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.Prev != hashOf(oldLines[len(oldLines)-1]) {
+		t.Error("a primeira linha do arquivo novo deveria apontar para a última do arquivo rotacionado")
+	}
+}
+
+func TestRotationLimitsDiskAndKeepsChainVerifiable(t *testing.T) {
+	log := rotatingLog(t, 60) // muito mais que Keep+1 arquivos
+
+	matches, err := filepath.Glob(log.Path + ".*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range matches {
+		if strings.HasSuffix(m, ".lock") || strings.HasSuffix(m, ".anchor") {
+			continue
+		}
+		if m != log.rotated(1) && m != log.rotated(2) {
+			t.Errorf("arquivo além de Keep: %s", m)
+		}
+	}
+	if _, err := os.Stat(log.anchorPath()); err != nil {
+		t.Fatalf("depois de apagar os antigos, a âncora deveria existir: %v", err)
+	}
+
+	r := log.Verify()
+	if !r.OK || r.Lines == 0 || r.Lines >= 60 {
+		t.Errorf("esperava corrente íntegra só com o que sobrou (menos que 60 linhas): %+v", r)
+	}
+	if r.Bytes > 3*(600+300) {
+		t.Errorf("o log passou do limite: %d bytes", r.Bytes)
+	}
+}
+
+func TestRotationDetectsTamperingAcrossFiles(t *testing.T) {
+	log := rotatingLog(t, 60)
+
+	data, err := os.ReadFile(log.rotated(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(log.rotated(2), []byte(strings.Replace(string(data), `"deny"`, `"allow"`, 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if r := log.Verify(); r.OK || r.File == "" {
+		t.Errorf("esperava corrente quebrada apontando o arquivo: %+v", r)
+	}
+}
+
+func TestRotationDetectsMissingMiddleFile(t *testing.T) {
+	log := rotatingLog(t, 60)
+	if err := os.Remove(log.rotated(1)); err != nil {
+		t.Fatal(err)
+	}
+	if r := log.Verify(); r.OK {
+		t.Errorf("um arquivo removido do meio deveria quebrar a corrente: %+v", r)
+	}
+}
+
+func TestDefaultLogDoesNotRotateEarly(t *testing.T) {
+	log := newLog(t, 50)
+	if _, err := os.Stat(log.rotated(1)); err == nil {
+		t.Error("50 linhas não deveriam rotacionar com o limite padrão")
+	}
+}
+
+func TestFailedAppendLeavesMarkerAndSuccessClearsIt(t *testing.T) {
+	dir := t.TempDir()
+	log := Log{Path: filepath.Join(dir, "audit.log")}
+
+	// Um diretório no lugar do arquivo: abrir para escrita falha.
+	if err := os.Mkdir(log.Path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := log.Append(Entry{Class: "x", Decision: "deny"}); err == nil {
+		t.Fatal("esperava erro")
+	}
+	h := log.Check()
+	if h.LastFailure == nil || h.LastFailure.Reason == "" {
+		t.Fatalf("esperava o marcador da última falha: %+v", h)
+	}
+	if h.WriteErr == nil {
+		t.Error("esperava erro de escrita no Check")
+	}
+
+	if err := os.Remove(log.Path); err != nil {
+		t.Fatal(err)
+	}
+	if err := log.Append(Entry{Class: "x", Decision: "deny"}); err != nil {
+		t.Fatal(err)
+	}
+	if h := log.Check(); h.LastFailure != nil || h.WriteErr != nil || !h.Chain.OK {
+		t.Errorf("depois de uma gravação boa o marcador deveria sumir: %+v", h)
+	}
+}
+
+func TestCheckDoesNotAppend(t *testing.T) {
+	log := newLog(t, 2)
+	before := lines(t, log)
+	log.Check()
+	if after := lines(t, log); len(after) != len(before) {
+		t.Errorf("Check acrescentou linhas: %d → %d", len(before), len(after))
+	}
+}
+
+func TestCheckReportsBrokenChain(t *testing.T) {
+	log := newLog(t, 3)
+	ls := lines(t, log)
+	ls[0] = strings.Replace(ls[0], "deny", "allow", 1)
+	writeLines(t, log, ls)
+	if h := log.Check(); h.Chain.OK || h.WriteErr != nil {
+		t.Errorf("esperava corrente quebrada e escrita ok: %+v", h)
+	}
+}
+
+func TestFailureMarkerNeverHoldsLongText(t *testing.T) {
+	log := Log{Path: filepath.Join(t.TempDir(), "audit.log")}
+	log.trackFailure(errors.New(strings.Repeat("x", 5000)))
+	h := log.Check()
+	if h.LastFailure == nil || len(h.LastFailure.Reason) > maxFailureReason {
+		t.Errorf("motivo deveria ser limitado a %d bytes: %+v", maxFailureReason, h.LastFailure)
+	}
+}
+
+func TestConcurrentAppendsWithRotationKeepChain(t *testing.T) {
+	log := Log{Path: filepath.Join(t.TempDir(), ".iron", "audit.log"), MaxSize: 800, Keep: 3}
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 10 {
+				if err := log.Append(Entry{Time: t0, Session: "s", Class: "git push", Decision: "deny"}); err != nil {
+					t.Error(err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	if r := log.Verify(); !r.OK || r.Lines == 0 {
+		t.Errorf("a corrente deveria ficar íntegra com gravações simultâneas e rotação: %+v", r)
+	}
+}
+
+func TestVerifyDoesNotDependOnKeep(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), ".iron")
+	big := Log{Path: filepath.Join(dir, "audit.log"), MaxSize: 600, Keep: 8}
+	for range 60 {
+		if err := big.Append(Entry{Time: t0, Session: "s", Class: "kubectl delete", Decision: "deny", Rule: "kubectl-delete"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(big.rotatedNumbers()) < 6 {
+		t.Fatalf("esperava mais de 5 arquivos rotacionados, obtive %d", len(big.rotatedNumbers()))
+	}
+
+	// Quem confere sem configuração (Keep padrão 5) vê tudo do mesmo jeito.
+	plain := Log{Path: big.Path}
+	if a, b := plain.Verify(), big.Verify(); !a.OK || a.Lines != b.Lines || a.Files != b.Files {
+		t.Errorf("Verify mudou com a configuração: %+v vs %+v", a, b)
+	}
+}
+
+func TestLowerKeepPrunesSeveralFilesAndKeepsChain(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), ".iron")
+	path := filepath.Join(dir, "audit.log")
+	entry := Entry{Time: t0, Session: "s", Class: "kubectl delete", Decision: "deny", Rule: "kubectl-delete"}
+
+	wide := Log{Path: path, MaxSize: 600, Keep: 8}
+	for range 60 {
+		if err := wide.Append(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Outro projeto, com Keep menor, dispara a rotação: poda tudo que passa de 2.
+	narrow := Log{Path: path, MaxSize: 600, Keep: 2}
+	for range 20 {
+		if err := narrow.Append(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if nums := narrow.rotatedNumbers(); len(nums) != 2 {
+		t.Errorf("esperava só 2 rotacionados, obtive %v", nums)
+	}
+	if r := narrow.Verify(); !r.OK || r.Lines == 0 {
+		t.Errorf("a corrente deveria continuar íntegra depois de podar vários: %+v", r)
 	}
 }

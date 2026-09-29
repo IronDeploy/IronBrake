@@ -19,6 +19,7 @@ import (
 	"github.com/IronDeploy/IronBrake/internal/rules"
 	"github.com/IronDeploy/IronBrake/internal/session"
 	"github.com/IronDeploy/IronBrake/internal/setup"
+	"github.com/IronDeploy/IronBrake/internal/tfplan"
 )
 
 func openEvent(t *testing.T, file string) *os.File {
@@ -33,7 +34,8 @@ func openEvent(t *testing.T, file string) *os.File {
 	return input
 }
 
-func fakeReadPlan(cwd, chdir, planFile string) ([]byte, error) {
+func fakeReadPlan(req tfplan.Request) ([]byte, error) {
+	planFile := req.PlanFile
 	files := map[string]string{
 		"create.tfplan":  "01-create-only.json",
 		"delete.tfplan":  "03-with-delete.json",
@@ -64,14 +66,14 @@ func devEnv(cwd string) rules.Env {
 
 func noSession(string, session.Activity) (hook.Decision, string) { return hook.Allow, "" }
 
-func discardAudit(audit.Entry) error { return nil }
+func discardAudit(audit.Entry, policy.AuditLog) error { return nil }
 
 type fakeAudit struct {
 	entries []audit.Entry
 	err     error
 }
 
-func (f *fakeAudit) append(e audit.Entry) error {
+func (f *fakeAudit) append(e audit.Entry, _ policy.AuditLog) error {
 	f.entries = append(f.entries, e)
 	return f.err
 }
@@ -333,9 +335,9 @@ func TestRunHookFourthApplyAsks(t *testing.T) {
 
 func TestRunHookReadsPlanInEventCwd(t *testing.T) {
 	var gotCwd string
-	readPlan := func(cwd, chdir, planFile string) ([]byte, error) {
-		gotCwd = cwd
-		return fakeReadPlan(cwd, chdir, planFile)
+	readPlan := func(req tfplan.Request) ([]byte, error) {
+		gotCwd = req.Cwd
+		return fakeReadPlan(req)
 	}
 	var stdout, stderr bytes.Buffer
 
@@ -667,7 +669,10 @@ func TestRunShieldLockUnlockWriteAuditEntries(t *testing.T) {
 }
 
 func TestRunDoctor(t *testing.T) {
+	// Cada caso isola o HOME: o doctor confere o log de auditoria de ~/.iron.
 	t.Run("tudo certo sai com 0", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("PATH", t.TempDir()) // nenhum terraform: o resultado não depende da máquina
 		dir := t.TempDir()
 		// Um "iron" de mentira que bloqueia, instalado pelo próprio init:
 		// assim o teste cobre o ciclo init -> doctor.
@@ -691,9 +696,38 @@ func TestRunDoctor(t *testing.T) {
 		if !strings.Contains(stdout.String(), "Tudo certo") {
 			t.Errorf("a saída deveria dizer que está tudo certo:\n%s", stdout.String())
 		}
+		if !strings.Contains(stdout.String(), "log de auditoria") {
+			t.Errorf("a saída deveria incluir a verificação do log de auditoria:\n%s", stdout.String())
+		}
+	})
+
+	t.Run("log de auditoria sem gravação faz o doctor falhar", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("PATH", t.TempDir())
+		dir := t.TempDir()
+		iron := filepath.Join(dir, "bin", "iron")
+		if err := os.MkdirAll(filepath.Dir(iron), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(iron, []byte("#!/bin/sh\nexit 2\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := setup.InstallHook(setup.SettingsPath(dir), iron); err != nil {
+			t.Fatal(err)
+		}
+		// Um diretório no lugar do arquivo do log: nada grava ali.
+		if err := os.MkdirAll(audit.DefaultPath(), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		var stdout bytes.Buffer
+
+		if code := runDoctor(dir, &stdout); code == 0 || !strings.Contains(stdout.String(), "não consigo gravar") {
+			t.Errorf("esperava falha citando a gravação, obtive código %d:\n%s", code, stdout.String())
+		}
 	})
 
 	t.Run("qualquer falha sai com código diferente de 0", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
 		var stdout bytes.Buffer
 
 		code := runDoctor(t.TempDir(), &stdout) // pasta sem .claude/settings.json
@@ -795,9 +829,9 @@ func TestRunHookReadsPlanOnlyWhenNeeded(t *testing.T) {
 		t.Run(c.command, func(t *testing.T) {
 			reads := 0
 			deps := testDeps()
-			deps.readPlan = func(cwd, chdir, planFile string) ([]byte, error) {
+			deps.readPlan = func(req tfplan.Request) ([]byte, error) {
 				reads++
-				return fakeReadPlan(cwd, chdir, planFile)
+				return fakeReadPlan(req)
 			}
 			var stdout, stderr bytes.Buffer
 
@@ -988,5 +1022,43 @@ func TestRunHookDeadlineDenies(t *testing.T) {
 
 	if code != 2 || !strings.Contains(stderr.String(), "tempo") {
 		t.Errorf("esperava deny por tempo; código %d, stderr %q", code, stderr.String())
+	}
+}
+
+func TestAuditLogFollowsPolicy(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	if got := auditLog(policy.AuditLog{}); got.MaxSize != 0 || got.Keep != 0 {
+		t.Errorf("sem configuração deveria deixar o padrão do audit, obtive %+v", got)
+	}
+	if got := auditLog(policy.AuditLog{MaxSizeMB: 20, Keep: 10}); got.MaxSize != 20<<20 || got.Keep != 10 {
+		t.Errorf("esperava 20 MB e 10 arquivos, obtive %+v", got)
+	}
+	// Os padrões do policy (piso) e do audit precisam ser os mesmos.
+	if policy.AuditDefaultMaxSizeMB<<20 != audit.DefaultMaxSize || policy.AuditDefaultKeep != audit.DefaultKeep {
+		t.Error("o piso do policy.yaml e o padrão do audit divergiram")
+	}
+}
+
+func TestRunHookPassesPolicyAuditConfigToTheLog(t *testing.T) {
+	log := &fakeAudit{}
+	deps := testDeps()
+	deps.audit = log.append
+	deps.loadEnv = func(cwd string) rules.Env {
+		p := policy.Default()
+		p.AuditLog = policy.AuditLog{MaxSizeMB: 20, Keep: 10}
+		return rules.Env{Policy: p, Context: []string{cwd}}
+	}
+	var gotCfg policy.AuditLog
+	deps.audit = func(e audit.Entry, cfg policy.AuditLog) error {
+		gotCfg = cfg
+		return log.append(e, cfg)
+	}
+
+	var stdout, stderr bytes.Buffer
+	runHook(strings.NewReader(`{"tool_name":"Bash","cwd":"/x","tool_input":{"command":"git status"}}`), &stdout, &stderr, deps)
+
+	if want := (policy.AuditLog{MaxSizeMB: 20, Keep: 10}); gotCfg != want {
+		t.Errorf("o log deveria receber %+v, recebeu %+v", want, gotCfg)
 	}
 }

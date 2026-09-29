@@ -9,6 +9,31 @@ import (
 	"testing"
 )
 
+func TestSummarizeAllMergesPlansAmongLogLines(t *testing.T) {
+	create := `{"format_version":"1.2","resource_changes":[{"address":"aws_s3_bucket.a","type":"aws_s3_bucket","change":{"actions":["create"]}}]}`
+	del := `{"format_version":"1.2","resource_changes":[{"address":"aws_db_instance.main","type":"aws_db_instance","change":{"actions":["delete"]}},{"address":"aws_ecs_service.api","type":"aws_ecs_service","change":{"actions":["delete","create"]}}]}`
+	out := "INFO   Running in 2 units\n[envs/a] " + create + "\nWARN   algo\n[envs/b] " + del + "\n"
+
+	s, err := SummarizeAll([]byte(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Create != 1 || s.Delete != 1 || s.Replace != 1 || len(s.Destructive) != 2 || s.Changed() != 3 {
+		t.Errorf("resumo somado errado: %+v", s)
+	}
+}
+
+func TestSummarizeAllRejectsUnreadablePlanLine(t *testing.T) {
+	good := `{"format_version":"1.2","resource_changes":[]}`
+	bad := `{"format_version":"1.2","resource_changes":[{"address":"x","type":"t","change":{"actions":["explode"]}}]}`
+	if _, err := SummarizeAll([]byte(good + "\n" + bad + "\n")); err == nil {
+		t.Error("um plano ilegível no meio não pode ser ignorado")
+	}
+	if _, err := SummarizeAll([]byte("só logs\nsem plano\n")); err == nil {
+		t.Error("sem nenhum plano, esperava erro")
+	}
+}
+
 func TestSummarizeSamplePlans(t *testing.T) {
 	cases := []struct {
 		file        string

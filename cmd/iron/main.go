@@ -22,6 +22,7 @@ import (
 	"github.com/IronDeploy/IronBrake/internal/setup"
 	"github.com/IronDeploy/IronBrake/internal/shieldui"
 	"github.com/IronDeploy/IronBrake/internal/tfplan"
+	"github.com/IronDeploy/IronBrake/internal/toolpath"
 )
 
 // version é definida na compilação com -ldflags "-X main.version=...".
@@ -58,7 +59,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "hook":
 		return runHook(stdin, stdout, stderr, hookDeps{
-			readPlan: tfplan.Show, confirm: dialog.Confirm, loadEnv: loadEnv, session: checkSession, audit: writeAudit,
+			readPlan: showPlan, confirm: dialog.Confirm, loadEnv: loadEnv, session: checkSession, audit: writeAudit,
 			deadline: hook.Deadline,
 		})
 	case "init":
@@ -89,7 +90,7 @@ type hookDeps struct {
 	confirm  func(string) dialog.Answer
 	loadEnv  func(cwd string) rules.Env
 	session  func(sessionID string, a session.Activity) (hook.Decision, string)
-	audit    func(audit.Entry) error
+	audit    func(audit.Entry, policy.AuditLog) error // a rotação vem do policy.yaml do projeto
 	deadline time.Duration
 }
 
@@ -113,12 +114,12 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer, deps hookDeps) int {
 		var event hook.PreToolUseEvent
 		if err := json.NewDecoder(stdin).Decode(&event); err != nil {
 			v := verdict{decision: hook.Deny, reason: "iron: não consegui ler o evento do stdin", rule: "event"}
-			done <- outcome{v, record(deps, audit.Entry{Class: "evento ilegível"}, v)}
+			done <- outcome{v, record(deps, audit.Entry{Class: "evento ilegível"}, v, policy.AuditLog{})}
 			return
 		}
-		v, changes := decide(event, deps)
+		v, changes, auditCfg := decide(event, deps)
 		entry := audit.Entry{Session: event.SessionID, Class: classOf(event), Resources: changes}
-		done <- outcome{v, record(deps, entry, v)}
+		done <- outcome{v, record(deps, entry, v, auditCfg)}
 	}()
 
 	select {
@@ -133,21 +134,21 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer, deps hookDeps) int {
 	}
 }
 
-func decide(event hook.PreToolUseEvent, deps hookDeps) (verdict, []audit.Resource) {
+func decide(event hook.PreToolUseEvent, deps hookDeps) (verdict, []audit.Resource, policy.AuditLog) {
 	command := event.ToolInput.Command
 	env := deps.loadEnv(event.Cwd)
 
 	checked := rules.Evaluate(command, env)
 	v := verdict{decision: checked.Decision, reason: checked.Reason, rule: checked.Rule}
 	if v.decision == hook.Deny {
-		return v, nil
+		return v, nil, env.Policy.AuditLog
 	}
 
 	apply := rules.InspectTerraformApply(command, event.Cwd, env, deps.readPlan)
 	changes := auditResources(apply.Changes)
 	v = combine(v, verdict{decision: apply.Decision, reason: apply.Reason, rule: ruleName(apply.Decision, rules.TerraformApplyRule)})
 	if v.decision == hook.Deny {
-		return v, changes
+		return v, changes, env.Policy.AuditLog
 	}
 
 	if event.SessionID != "" {
@@ -162,15 +163,15 @@ func decide(event hook.PreToolUseEvent, deps hookDeps) (verdict, []audit.Resourc
 	if v.decision == hook.Ask {
 		v = confirmAsk(command, v, deps.confirm)
 	}
-	return v, changes
+	return v, changes, env.Policy.AuditLog
 }
 
 // record grava a decisão no log. Uma falha não muda a decisão.
-func record(deps hookDeps, entry audit.Entry, v verdict) error {
+func record(deps hookDeps, entry audit.Entry, v verdict, cfg policy.AuditLog) error {
 	entry.Decision = string(v.decision)
 	entry.Rule = v.rule
 	entry.Dialog = v.dialog
-	return deps.audit(entry)
+	return deps.audit(entry, cfg)
 }
 
 func classOf(event hook.PreToolUseEvent) string {
@@ -217,9 +218,37 @@ func checkSession(sessionID string, a session.Activity) (hook.Decision, string) 
 	return session.Store{Dir: session.DefaultDir()}.Check(sessionID, a, time.Now())
 }
 
-func writeAudit(e audit.Entry) error {
+// showPlan lê o plano com o programa que o ~/.iron/config.yaml indica (ou o do
+// PATH, se não for suspeito).
+func showPlan(req tfplan.Request) ([]byte, error) {
+	cfg, err := toolpath.Load(toolpath.ConfigPath())
+	if err != nil {
+		return nil, err
+	}
+	req.Config = cfg
+	req.ProjectDirs = []string{os.Getenv("CLAUDE_PROJECT_DIR"), req.Cwd}
+	return tfplan.Show(req)
+}
+
+func writeAudit(e audit.Entry, cfg policy.AuditLog) error {
 	e.Time = time.Now()
-	return audit.Log{Path: audit.DefaultPath()}.Append(e)
+	return auditLog(cfg).Append(e)
+}
+
+// auditLog aplica a rotação do policy.yaml (zero = padrão do audit).
+func auditLog(cfg policy.AuditLog) audit.Log {
+	return audit.Log{Path: audit.DefaultPath(), MaxSize: int64(cfg.MaxSizeMB) << 20, Keep: cfg.Keep}
+}
+
+// projectAuditConfig lê a rotação do policy.yaml do projeto atual, para os
+// comandos que rodam no terminal (shield). Política ausente ou com erro: padrão.
+func projectAuditConfig() policy.AuditLog {
+	dir := os.Getenv("CLAUDE_PROJECT_DIR")
+	if dir == "" {
+		dir, _ = os.Getwd()
+	}
+	p, _ := policy.Load(dir)
+	return p.AuditLog
 }
 
 // loadEnv usa a política de CLAUDE_PROJECT_DIR (ou da pasta do comando).
@@ -236,6 +265,7 @@ func loadEnv(cwd string) rules.Env {
 		Context:     runenv.Collect(cwd, os.Getenv, readContextFile),
 		PolicyError: err != nil,
 		Cwd:         cwd,
+		DataDir:     os.Getenv("TF_DATA_DIR"),
 		ReadFile:    readContextFile,
 	}
 }
@@ -278,11 +308,11 @@ func runAudit(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "iron: %s não existe: nenhuma decisão registrada ainda.\n", log.Path)
 		return 0
 	case r.OK:
-		fmt.Fprintf(stdout, "iron: corrente íntegra: %d linha(s) conferida(s) em %s.\n", r.Lines, log.Path)
+		fmt.Fprintf(stdout, "iron: corrente íntegra: %d linha(s) conferida(s) em %s (%d arquivo(s)).\n", r.Lines, log.Path, r.Files)
 		fmt.Fprintln(stdout, "      (a corrente não detecta se o arquivo inteiro ou as últimas linhas foram apagados.)")
 		return 0
 	case r.BrokenAt > 0:
-		fmt.Fprintf(stdout, "iron: corrente QUEBRADA na linha %d de %s: %s.\n", r.BrokenAt, log.Path, r.Reason)
+		fmt.Fprintf(stdout, "iron: corrente QUEBRADA na linha %d (arquivo %s): %s.\n", r.BrokenAt, r.File, r.Reason)
 		// A linha N confirma a N-1: se N não bate, a suspeita é a N-1.
 		if confirmed := r.BrokenAt - 2; confirmed > 0 {
 			fmt.Fprintf(stdout, "      confirmadas: linhas 1 a %d. suspeita: linha %d (ou uma linha removida logo depois dela).\n", confirmed, r.BrokenAt-1)
@@ -506,7 +536,7 @@ func logShieldEvent(stderr io.Writer, action string, count int) {
 // "<categoria>: N regra(s)" para um toggle individual no scan --manage).
 func logShieldEventFor(stderr io.Writer, action, rule string) {
 	entry := audit.Entry{Class: "iron shield", Decision: action, Rule: rule}
-	if err := writeAudit(entry); err != nil {
+	if err := writeAudit(entry, projectAuditConfig()); err != nil {
 		fmt.Fprintln(stderr, "iron: não consegui gravar o log de auditoria")
 	}
 }
@@ -532,7 +562,11 @@ func doctorHere(stdout, stderr io.Writer) int {
 }
 
 func runDoctor(dir string, stdout io.Writer) int {
-	results := doctor.Run(setup.SettingsPath(dir), version, doctorTimeout)
+	results := doctor.RunAll(setup.SettingsPath(dir), version, doctorTimeout, doctor.Extra{
+		Log:        audit.Log{Path: audit.DefaultPath()},
+		ConfigPath: toolpath.ConfigPath(),
+		ProjectDir: dir,
+	})
 	doctor.Print(stdout, results)
 	if !doctor.AllOK(results) {
 		return 1

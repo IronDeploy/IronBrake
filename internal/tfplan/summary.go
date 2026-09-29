@@ -83,6 +83,45 @@ func Summarize(data []byte) (Summary, error) {
 	return s, nil
 }
 
+// planStart abre o JSON de um plano na saída do terraform show.
+const planStart = `{"format_version"`
+
+// SummarizeAll resume a saída de um show. Um plano vira um Summarize comum. O
+// terragrunt run-all imprime um plano por módulo, com linhas de log no meio:
+// cada linha com um plano é resumida e as contagens são somadas. Uma linha de
+// plano que não dá para ler é erro, nunca é ignorada (o risco ficaria
+// subestimado).
+func SummarizeAll(data []byte) (Summary, error) {
+	one, err := Summarize(data)
+	if err == nil {
+		return one, nil
+	}
+
+	var total Summary
+	found := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		i := strings.Index(line, planStart)
+		if i < 0 {
+			continue
+		}
+		s, lineErr := Summarize([]byte(line[i:]))
+		if lineErr != nil {
+			return Summary{}, lineErr
+		}
+		found++
+		total.Create += s.Create
+		total.Update += s.Update
+		total.Delete += s.Delete
+		total.Replace += s.Replace
+		total.Destructive = append(total.Destructive, s.Destructive...)
+		total.Changes = append(total.Changes, s.Changes...)
+	}
+	if found == 0 {
+		return Summary{}, err
+	}
+	return total, nil
+}
+
 const (
 	maxAddressLength = 200
 	maxKeyLength     = 40

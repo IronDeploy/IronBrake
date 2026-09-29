@@ -97,3 +97,34 @@ func BenchmarkCollectLargeKubeconfig(b *testing.B) {
 		Collect("/proj", env, files)
 	}
 }
+
+func TestCollectHonorsTFDataDir(t *testing.T) {
+	files := fakeFiles(map[string]string{
+		"/proj/.terraform/environment": "staging\n",
+		"/proj/.tfdata/environment":    "prod-eu\n",
+		"/abs/tfdata/environment":      "prd\n",
+	})
+
+	got := Collect("/proj", fakeEnv(map[string]string{"TF_DATA_DIR": ".tfdata"}), files)
+	if !slices.Contains(got, "prod-eu") || slices.Contains(got, "staging") {
+		t.Errorf("TF_DATA_DIR relativo: %q", got)
+	}
+	got = Collect("/proj", fakeEnv(map[string]string{"TF_DATA_DIR": "/abs/tfdata"}), files)
+	if !slices.Contains(got, "prd") {
+		t.Errorf("TF_DATA_DIR absoluto: %q", got)
+	}
+}
+
+func TestWorkspace(t *testing.T) {
+	files := fakeFiles(map[string]string{"/p/infra/.terraform/environment": "  prod \n", "/p/vazio/.terraform/environment": "\n"})
+
+	if name, ok := Workspace("/p/infra", "", files); !ok || name != "prod" {
+		t.Errorf("%q %v", name, ok)
+	}
+	if _, ok := Workspace("/p/vazio", "", files); ok {
+		t.Error("arquivo vazio não é workspace")
+	}
+	if _, ok := Workspace("/p/nao", "", files); ok {
+		t.Error("pasta sem arquivo não tem workspace")
+	}
+}

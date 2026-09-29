@@ -62,6 +62,9 @@ hook que aponta para um binário que sumiu **não bloqueia nada**.
   como variável de ambiente (`$$VERSION`), e o fluxo recusa tags fora de
   `vX.Y.Z`. O git aceita crase em nome de tag; antes, uma tag com crase
   executava um comando no `make dist`.
+- **Atestado de proveniência** dos binários, do `install.sh` e do
+  `SHA256SUMS`, assinado fora da release (seção abaixo). `id-token: write` e
+  `attestations: write` só no job de release.
 - **Nenhum agente de IA com escrita no fluxo de release.** Quem cria uma tag
   `v*` publica um binário que outras pessoas instalam com um comando e que o
   `SHA256SUMS` vai "confirmar" (o hash é gerado junto com o binário). Um
@@ -75,7 +78,52 @@ hook que aponta para um binário que sumiu **não bloqueia nada**.
 
 O `install.sh` baixa o binário **e** o `SHA256SUMS` da mesma release e
 confere um contra o outro. Isso pega download corrompido ou trocado no
-caminho. **Não** pega uma release inteira adulterada (quem troca o binário
-troca o `SHA256SUMS` junto). Para isso seria preciso assinar a release fora
-do repositório (por exemplo, atestados de proveniência do GitHub,
-`gh attestation verify`) — ainda não feito.
+caminho. **Não** pega uma release inteira adulterada: quem troca o binário
+troca o `SHA256SUMS` junto. Quem faz essa conferência é o atestado abaixo.
+
+## Atestado de proveniência (`gh attestation verify`)
+
+O passo "Atestar a proveniência" do fluxo (`actions/attest-build-provenance`,
+fixada pelo SHA) assina, com a identidade do próprio fluxo, cada binário, o
+`install.sh` e o `SHA256SUMS`. A assinatura fica no GitHub, **fora da
+release**: trocar um arquivo da release não a refaz. O job de release ganha
+`id-token: write` e `attestations: write` (só ele; o resto continua sem
+permissão).
+
+**Conferir um binário baixado** (precisa do [gh](https://cli.github.com),
+com `gh auth login`):
+
+```bash
+gh attestation verify iron_linux_amd64 --repo IronDeploy/IronBrake \
+  --signer-workflow IronDeploy/IronBrake/.github/workflows/release.yml
+```
+
+Para exigir uma versão exata, some `--source-ref refs/tags/vX.Y.Z`. Passando,
+o `gh` confirma que o arquivo tem exatamente o hash atestado e que foi gerado
+por aquele fluxo, a partir daquela tag e daquele commit.
+
+**No instalador**, a conferência é opcional (o `gh` não vem instalado na
+maioria das máquinas):
+
+```bash
+curl -fsSL https://github.com/IronDeploy/IronBrake/releases/latest/download/install.sh \
+  | IRON_VERIFY_ATTESTATION=1 sh
+```
+
+Com `IRON_VERIFY_ATTESTATION=1`, o instalador confere o hash e o atestado, e
+**não instala nada** se faltar o `gh`, se ele não estiver logado ou se o atestado
+não bater. Sem a variável, só confere o hash e mostra uma dica.
+
+**O que o atestado garante:** o arquivo foi gerado pelo `release.yml` deste
+repositório, a partir de uma tag. **O que não garante:** que o código seja
+inofensivo. Quem consegue rodar o fluxo (criar a tag `v*` e aprovar o ambiente
+`release`) publica um binário atestado do mesmo jeito; por isso valem os
+controles da seção "Segurança do fluxo" (tags protegidas, aprovação humana,
+nenhum agente de IA com escrita). E o atestado só vale se quem confere pede o
+fluxo certo (`--signer-workflow`), não qualquer fluxo do repositório.
+
+**Ainda não verificado de ponta a ponta:** o passo foi acrescentado ao fluxo,
+mas ainda não rodou numa tag real, e a conferência não foi executada com o `gh`
+de verdade (não há `gh` na máquina de desenvolvimento). Na próxima release
+(`v0.1.1`), rode o `gh attestation verify` acima num binário baixado antes de
+contar com isso.

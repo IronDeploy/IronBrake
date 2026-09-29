@@ -41,15 +41,19 @@ produção, ask fora, salvo os catastróficos que são deny sempre): filesystem
 sistema, `find -delete`), `curl|sh` e `curl -X DELETE`, contêineres (docker/
 podman prune, `volume rm`, `rm -f`, `compose down -v`), sistema (`shutdown`,
 `systemctl stop`, `crontab -r`, firewall), publicação de pacote (`npm publish`
-etc.), `terraform state rm`/`taint`/`workspace delete`/`force-unlock` (e `tofu`),
+etc.), `terraform state rm`/`mv`/`push`/`taint`/`workspace delete`/`force-unlock`/`import` (e `tofu` e
+`terragrunt`, inclusive `run-all`, `run --all --`, `apply-all` e `destroy-all`),
 git (`branch -D`, `tag -d`, `reflog expire`, `gc --prune=now`, `filter-branch`,
 `restore`/`checkout` de descarte, `push :branch`/`--delete` — branch protegida é
-deny), kubectl (`delete pvc/pv`, `scale --replicas=0`, `replace --force`), helm
+deny), kubectl (`delete pvc/pv/crd`, `delete -A`/`--all-namespaces`, `scale --replicas=0`,
+`replace --force`), helm
 (`uninstall`, `rollback`), nuvem em massa (`s3 rm --recursive`, `s3 rb --force`,
-`gcloud/gsutil storage rm`, `az ... delete-*`/`purge`), SQL (`DROP SCHEMA`).
+`gcloud/gsutil storage rm`, `az ... delete-*`/`purge`), SQL (`DROP SCHEMA`, `DELETE ... WHERE 1=1`, `WHERE TRUE`, `WHERE id=1 OR 1=1` e outros
+`WHERE` sempre verdadeiros).
 
 Também passou a **ler o arquivo apontado** pelo comando: `kubectl delete -f x.yaml`
-(procura `kind: Namespace`/`PersistentVolumeClaim`/`PersistentVolume`) e
+(procura `kind: Namespace`/`PersistentVolumeClaim`/`PersistentVolume`/
+`CustomResourceDefinition`, em YAML ou JSON, inclusive dentro de `kind: List`) e
 `psql -f drop.sql` / `mysql < drop.sql` (roda a análise de SQL no conteúdo).
 Alvo que não dá para ler (URL remota, stdin `-`, kustomize `-k`, arquivo
 inexistente): allow fora de produção, ask em produção.
@@ -58,12 +62,18 @@ O que **ainda** sai com **código 0**:
 
 | Categoria | Comando | Por que passa |
 |---|---|---|
-| terraform | `terraform import`; `terragrunt ...` | `import` sem regra; só `terraform` e `tofu` são reconhecidos |
-| kubernetes | `kubectl delete pods -A -l app=x` | `-A`/`--all-namespaces` não é `--all` |
-| kubernetes | `kubectl delete -f x.yaml` com `kind` fora da lista (ex.: `Deployment`) | só Namespace/PVC/PV são tratados como perigosos |
-| SQL | `DELETE FROM users WHERE 1=1` | tem `WHERE`, mas apaga tudo |
+| kubernetes | `kubectl delete -f x.yaml` com `kind: Deployment`, `StatefulSet`, `Service`... | de propósito: é o mesmo que `kubectl delete deploy NOME`, que também passa. Só kinds que apagam dados ou em cascata (Namespace, PVC, PV, CRD) são tratados como perigosos |
+| SQL | `DELETE ... WHERE` com condição que só é verdadeira por um cálculo (`WHERE id >= 0`, `WHERE id IS NOT NULL`, `WHERE length(name) >= 0`) | só literais e igualdades óbvias são reconhecidos (`1=1`, `TRUE`, `'a'='a'`, `id=id`, `1<>0`, `OR` com qualquer um deles) |
 | arquivos | `rm -rf` em caminho absoluto fora da lista crítica (`/data/prod`) | não é catastrófico universal; cai no ambiente só se casar com `production_patterns` |
 | nuvem | exclusão via SDK ou HTTP direto (sem a CLI) | não aparece como comando de CLI reconhecido |
+
+O `terragrunt apply` segue a mesma regra do terraform ("sem plano, sem apply"): o
+plano é lido com `terragrunt show -json PLANO` (também `run-all` e `run --all --`,
+somando os planos dos módulos) e o cartão de risco vale igual. **Ainda não foi
+testado com o terragrunt de verdade** (só com um programa falso no lugar dele, nos
+testes): confirme com um `plan -out` real antes de confiar. No `run-all`, os
+módulos não aparecem no comando, então a detecção de produção só vale pelo
+contexto (perfil, workspace, `--working-dir`).
 
 Qualquer regra também escapa por variável no lugar do comando e por scripts
 (seção 1). Prefixos (`sudo`, `env`, `sh -c`, `eval`...) **não** escapam: são
@@ -135,9 +145,14 @@ travamento usa 1 s. Depois disso, 5 rodadas completas sem falha.
   lidos são os do processo do hook (herdados do Claude Code). Um
   `export AWS_PROFILE=prod` feito antes, no shell do agente, não é visto — a
   não ser que esteja na mesma linha do comando.
-- **Workspace do terraform:** só é lido em `<cwd>/.terraform/environment`; com
-  `-chdir=outra/pasta`, o workspace daquela pasta não é lido (o nome da pasta
-  no `-chdir` conta, porque está no comando).
+- **Workspace do terraform (corrigido):** é lido na pasta atual e também na
+  de `terraform -chdir=DIR` (e `tofu`) e na de `cd DIR && terraform ...`, com
+  `TF_DATA_DIR` respeitado (relativo, vale a partir da pasta do comando).
+  Limites: um `cd` que não dá para resolver (`cd ~`, `cd -`, `cd $VAR`,
+  `popd`) volta ao que já se sabia; um `(cd x; ...)` conta como `cd x` para o
+  resto da linha (pode dar falso positivo, nunca falso negativo); `TF_DATA_DIR=x`
+  escrito na mesma linha, antes do comando, não é visto; e o terragrunt não é
+  coberto (o workspace dele fica no cache do módulo).
 - **O agente pode editar o `.iron/policy.yaml`** com a ferramenta Write (o
   Iron Brake só vê Bash). Como o arquivo só soma, ele não consegue remover os
   padrões embutidos; mas pode adicionar padrões que só geram mais bloqueios,
@@ -156,9 +171,13 @@ travamento usa 1 s. Depois disso, 5 rodadas completas sem falha.
 - **Evento sem `session_id`:** a memória não roda (não há onde guardar).
 - **Windows não testado:** a trava lá usa o arquivo aberto sem
   compartilhamento; compila, mas nunca rodou num Windows.
-- **"Muito parecido" é limitado:** só espaços, aspas, barras invertidas e
-  maiúsculas. `terraform apply plan1` e `plan2` contam como comandos
-  diferentes.
+- **"Muito parecido" ignora números:** além de espaços, aspas, barras
+  invertidas e maiúsculas, cada sequência de dígitos vale igual. `terraform
+  apply plan1`, `plan2` e `plan-20260929-1030` contam como o mesmo comando.
+  Efeito colateral: comandos legítimos que só mudam o número também se somam
+  (`kubectl delete pod web-1`, `web-2`, `web-3` em 5 minutos → ask). Ainda não
+  vale para nomes sem número (`plan-a`, `plan-b`) nem para ordem de opções
+  (`-auto-approve -input=false` ≠ `-input=false -auto-approve`).
 - **Hash de segredo curto:** o hash com sal impede tabelas prontas e liga o
   hash a uma sessão só, mas quem tem o arquivo (que já é `0600`) e sabe o
   formato do comando pode testar senhas fracas uma a uma.
@@ -178,9 +197,26 @@ travamento usa 1 s. Depois disso, 5 rodadas completas sem falha.
   Demonstrado em `TestVerifyCannotDetectRewrittenChain`.
 - Os três só se resolvem com um registro **fora da máquina** (fase 2: um
   servidor que recebe periodicamente o hash da última linha).
-- **Falha ao gravar é silenciosa para você**: o aviso vai para o stderr, que o
-  Claude Code só mostra no deny. O `iron doctor` ainda não confere o log.
-- **O log cresce sem limite** (~180 bytes por comando); não há rotação.
+- **Falha ao gravar (corrigido):** o aviso continua indo para o stderr, que o
+  Claude Code só mostra no deny, mas agora o hook também grava um marcador
+  (`audit.log.error`, com hora e motivo) e o `iron doctor` (verificação 5)
+  falha enquanto a última gravação tiver falhado, ou se o log não puder ser
+  gravado, ou se a corrente estiver quebrada. Limite: se a própria pasta
+  `~/.iron` não aceita gravação, o marcador também não entra; aí quem pega é a
+  checagem de escrita do doctor, que só roda quando você roda o doctor.
+- **Rotação (corrigido):** passando de 5 MB o log vira `audit.log.1` e ficam 5
+  antigos (no máximo ~30 MB, cerca de 30 mil decisões por arquivo). A
+  corrente continua entre os arquivos e `iron audit verify` confere todos.
+  Tamanho e quantidade podem ser aumentados no `audit_log` do
+  `.iron/policy.yaml` (de 5 a 100, nunca abaixo do padrão). **O log é um só por
+  usuário e o `policy.yaml` é por projeto:** quem gira o log é o hook do
+  projeto onde a decisão acontece, e usa a configuração dele; um projeto sem
+  `audit_log` (padrão 5) poda o que outro projeto configurou para guardar mais.
+  Para o valor valer sempre, ponha o mesmo `audit_log` em todos os projetos.
+  Efeito: depois de muitas decisões, as mais antigas **somem** do disco
+  (o que sai é o arquivo mais antigo inteiro). Quem precisa guardar tudo deve
+  copiar `audit.log.*` antes; o `.anchor` mantém a corrente conferível, mas
+  não é uma prova externa (mesma limitação das outras linhas desta seção).
 - **Endereços do terraform** podem conter dados em chaves de `for_each`
   (ex.: `aws_iam_user.u["ana@empresa.com"]`).
 - **`session` é o `session_id` do Claude Code**, gravado como veio.
@@ -210,7 +246,8 @@ Decisões tomadas depois da revisão:
 
 | Ponto | Decisão |
 |---|---|
-| **Risco aceito:** um `terraform` falso num diretório do `PATH` muda o resultado do `terraform show` (o Iron Brake leria um plano inventado) | registrado, sem mudança por enquanto. Mitigação possível no futuro: caminho absoluto do terraform no `policy.yaml` |
+| **Risco:** um `terraform` falso num diretório do `PATH` muda o resultado do `terraform show` (o Iron Brake leria um plano inventado) | **mitigado:** o caminho absoluto vai em `tools.terraform` (`tofu`, `terragrunt`) no `~/.iron/config.yaml` e o Iron Brake executa exatamente esse. Sem configuração, ele recusa o programa do `PATH` que estiver **dentro do projeto** ou que **qualquer usuário possa alterar** (arquivo ou pasta gravável por todos). O `iron doctor` (verificação 5) mostra o que será usado. Fica de fora: um falso num diretório do `PATH` só seu, que o agente escreve com o seu usuário |
+| O caminho do terraform não pode ficar no `.iron/policy.yaml` | de propósito: o hook executa o programa indicado, e o `policy.yaml` vem do repositório (ou de um agente que o edita); um projeto clonado rodaria código na sua máquina. Por isso a configuração é do usuário, em `~/.iron/config.yaml` |
 | Chaves de `for_each` vão no motivo enviado ao Claude e poderiam carregar texto de prompt injection | **corrigido:** o `tfplan.Summarize` saneia os endereços (chave com caractere fora de `A-Z a-z 0-9 _ . : / @ + -` ou com mais de 40 caracteres vira `["…"]`; caracteres de controle viram `?`; até 200 caracteres). Vale para o cartão, a janela e o log |
 | `timeout` do hook menor que o prazo do Iron Brake anula o deny por tempo | **corrigido:** o `iron doctor` confere (verificação 4/5): ausente (padrão 600 s) ou pelo menos 570 s |
 
@@ -220,7 +257,13 @@ Decisões tomadas depois da revisão:
   Windows (instalação manual pelo `.exe`). Nomes como `terraform.exe` na
   linha de comando não são reconhecidos pelas regras.
 - **O `SHA256SUMS` vem da mesma release que o binário:** pega download
-  corrompido, não release adulterada (ver [release.md](release.md)).
+  corrompido, não release adulterada. A conferência contra adulteração é o
+  atestado de proveniência (`gh attestation verify`, ou
+  `IRON_VERIFY_ATTESTATION=1` no instalador; ver [release.md](release.md)).
+  **Pendente de verificar:** o passo de atestado foi acrescentado ao fluxo,
+  mas ainda não rodou numa tag real nem foi conferido com o `gh` de verdade.
+  Enquanto isso não acontecer na próxima release, não conte com ele. O
+  instalador **não** exige o atestado por padrão (o `gh` não vem instalado).
 - **Fluxo de release verificado em 2026-09-28:** a tag `v0.1.0` rodou o
   `.github/workflows/release.yml` de ponta a ponta — `test` e `release`
   concluíram com sucesso, com os 6 binários, o `install.sh` e o

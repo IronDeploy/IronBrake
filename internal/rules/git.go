@@ -10,16 +10,16 @@ import (
 // Motivos e descrições nunca repetem o comando: ele pode ter segredos.
 const (
 	forcePushDenyReason = "Iron Brake: force push bloqueado. Ele reescreve o histórico remoto e pode apagar o trabalho de outras pessoas. Use um push normal; se realmente for necessário, peça ao usuário para executar."
-	forcePushAskReason  = "Iron Brake: --force-with-lease ainda reescreve o histórico remoto. Confirme com o usuário antes de continuar."
+	forcePushAskReason  = "Iron Brake: --force-with-lease ainda reescreve o histórico remoto. Confirme com o usuário antes de continuar. Se rodar, commits de outras pessoas podem ser apagados do remoto sem volta."
 	resetHardDanger     = "git reset --hard descarta alterações não commitadas sem volta (git stash guarda em vez de apagar)."
 	cleanForceDanger    = "git clean -f apaga arquivos não rastreados pelo git sem volta (git clean -n mostra o que seria apagado)."
 
 	branchDeleteDanger    = "git branch -D apaga a branch mesmo sem merge: o trabalho dela pode se perder."
-	tagDeleteDanger       = "git tag -d apaga a tag; com push --delete some também da remota."
+	tagDeleteDanger       = "git tag -d apaga a tag; com push --delete some também da remota: releases e pipelines que dependem dessa versão deixam de encontrá-la."
 	stashDropDanger       = "git stash drop/clear apaga alterações guardadas sem volta."
 	reflogExpireDanger    = "git reflog expire remove o histórico de recuperação: depois dele um commit perdido não volta."
 	gcPruneDanger         = "git gc --prune=now apaga objetos inalcançáveis e elimina a rede de segurança do reflog."
-	filterBranchDanger    = "git filter-branch/filter-repo reescreve todo o histórico do repositório."
+	filterBranchDanger    = "git filter-branch/filter-repo reescreve todo o histórico do repositório: todos os commits mudam de hash, e o histórico antigo se perde se o resultado for enviado com force push."
 	updateRefDeleteDanger = "git update-ref -d apaga uma referência direto, sem rede de segurança."
 	restoreDanger         = "git restore/checkout descarta alterações do diretório de trabalho sem volta (git stash guarda em vez de apagar)."
 

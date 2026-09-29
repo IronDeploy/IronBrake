@@ -17,7 +17,7 @@ const (
 	chmodRootDanger      = "chmod/chown recursivo em um caminho de sistema quebra permissões da máquina inteira."
 
 	findDeleteDanger = "find sem filtro de nome com -delete ou -exec rm apaga tudo sob o caminho, sem volta (adicione -name/-path, ou rode sem -delete para ver o que casaria)."
-	shredFileDanger  = "shred sobrescreve o arquivo para impedir recuperação."
+	shredFileDanger  = "shred sobrescreve o arquivo para impedir recuperação: o conteúdo é perdido e nenhuma ferramenta o traz de volta."
 )
 
 var (

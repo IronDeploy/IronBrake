@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -10,14 +11,20 @@ var infraPrograms = []string{
 	"terraform", "tofu", "terragrunt", "kubectl", "helm", "aws", "az", "gcloud", "gsutil",
 }
 
-// Normalize devolve a forma canônica da linha, para comparar repetições.
+// Normalize devolve a forma canônica da linha, para comparar repetições:
+// sem diferença de espaços, aspas, barras e maiúsculas, e com cada sequência
+// de dígitos trocada por "#". Assim terraform apply plan1 e plan2 (ou
+// plan-20260929-1030) contam como o mesmo comando; um agente em loop costuma
+// só trocar o número do arquivo.
 func Normalize(command string) string {
 	var parts []string
 	for _, tokens := range splitCommands(command) {
 		parts = append(parts, strings.Join(tokens, " "))
 	}
-	return strings.ToLower(strings.Join(parts, " ; "))
+	return digitRun.ReplaceAllString(strings.ToLower(strings.Join(parts, " ; ")), "#")
 }
+
+var digitRun = regexp.MustCompile(`[0-9]+`)
 
 // TouchesInfra diz se algum comando da linha mexe em infraestrutura.
 func TouchesInfra(command string) bool {

@@ -10,6 +10,9 @@
 #     de uma pessoa (Settings → Environments → release → Required reviewers).
 #   - Sem cache do Go na release: um cache envenenado por outro fluxo não
 #     entra no binário publicado.
+#   - Os arquivos saem com atestado de proveniência (assinado pelo GitHub, fora
+#     do repositório): quem baixa confere com "gh attestation verify" que o
+#     binário foi gerado por este fluxo, a partir da tag, e não colocado à mão.
 
 name: release
 
@@ -41,6 +44,8 @@ jobs:
     environment: release
     permissions:
       contents: write
+      id-token: write # o atestado é assinado com a identidade do fluxo (OIDC)
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -57,6 +62,13 @@ jobs:
           fi
       - name: Gerar binários e SHA256SUMS
         run: make dist VERSION="$GITHUB_REF_NAME"
+      - name: Atestar a proveniência
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/iron_*
+            dist/install.sh
+            dist/SHA256SUMS
       - name: Criar a release
         # O gh já vem instalado no runner: não precisa de ação de terceiros.
         run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "$GITHUB_REF_NAME" --generate-notes

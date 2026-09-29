@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/IronDeploy/IronBrake/internal/audit"
 )
 
 const (
@@ -299,5 +301,92 @@ func TestRunHookTimeoutDefault(t *testing.T) {
 
 	if !results[3].OK || !strings.Contains(results[3].Detail, "padrão") {
 		t.Errorf("sem timeout no settings.json deveria passar citando o padrão; obtive %+v", results[3])
+	}
+}
+
+func TestCheckAudit(t *testing.T) {
+	newLog := func(t *testing.T) audit.Log {
+		return audit.Log{Path: filepath.Join(t.TempDir(), ".iron", "audit.log")}
+	}
+	entry := audit.Entry{Class: "git push", Decision: "deny", Session: "s"}
+
+	t.Run("sem log ainda: ok", func(t *testing.T) {
+		r := CheckAudit(newLog(t))
+		if !r.OK || !strings.Contains(r.Detail, "ainda sem decisões") {
+			t.Errorf("%+v", r)
+		}
+	})
+
+	t.Run("log íntegro: ok e mostra o tamanho", func(t *testing.T) {
+		log := newLog(t)
+		for range 3 {
+			if err := log.Append(entry); err != nil {
+				t.Fatal(err)
+			}
+		}
+		r := CheckAudit(log)
+		if !r.OK || !strings.Contains(r.Detail, "3 linha(s) em 1 arquivo(s)") {
+			t.Errorf("%+v", r)
+		}
+	})
+
+	t.Run("não grava: falha e diz como corrigir", func(t *testing.T) {
+		log := newLog(t)
+		if err := os.MkdirAll(log.Path, 0o700); err != nil { // diretório no lugar do arquivo
+			t.Fatal(err)
+		}
+		r := CheckAudit(log)
+		if r.OK || !strings.Contains(r.Detail, "não consigo gravar") || r.Fix == "" {
+			t.Errorf("%+v", r)
+		}
+	})
+
+	t.Run("a última gravação do hook falhou", func(t *testing.T) {
+		log := newLog(t)
+		if err := os.MkdirAll(log.Path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		log.Append(entry) // falha e deixa o marcador
+		if err := os.Remove(log.Path); err != nil {
+			t.Fatal(err)
+		}
+		r := CheckAudit(log) // agora dá para gravar, mas o marcador continua
+		if r.OK || !strings.Contains(r.Detail, "a última gravação do hook falhou") {
+			t.Errorf("%+v", r)
+		}
+		if err := log.Append(entry); err != nil {
+			t.Fatal(err)
+		}
+		if r := CheckAudit(log); !r.OK {
+			t.Errorf("depois de uma gravação boa deveria passar: %+v", r)
+		}
+	})
+
+	t.Run("corrente quebrada", func(t *testing.T) {
+		log := newLog(t)
+		for range 3 {
+			log.Append(entry)
+		}
+		data, _ := os.ReadFile(log.Path)
+		os.WriteFile(log.Path, []byte(strings.Replace(string(data), `"deny"`, `"allow"`, 1)), 0o600)
+		r := CheckAudit(log)
+		if r.OK || !strings.Contains(r.Detail, "a corrente quebrou") || !strings.Contains(r.Fix, "iron audit verify") {
+			t.Errorf("%+v", r)
+		}
+	})
+}
+
+func TestRunAllPutsAuditBeforeVersion(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // nenhum terraform: o resultado não depende da máquina
+	dir := t.TempDir()
+	iron := newFakeIron(t, dir, scriptDeny, 0o755)
+	path := writeSettings(t, dir, settingsWith(t, "Bash", iron))
+	log := audit.Log{Path: filepath.Join(dir, ".iron", "audit.log")}
+
+	results := RunAll(path, testVersion, testTimeout, Extra{Log: log, ConfigPath: filepath.Join(dir, "config.yaml"), ProjectDir: dir})
+
+	assertOK(t, results, true, true, true, true, true, true, true)
+	if results[4].Name != nameTools || results[5].Name != nameAudit || results[6].Detail != testVersion {
+		t.Errorf("ordem: %q, %q, %q", results[4].Name, results[5].Name, results[6].Name)
 	}
 }

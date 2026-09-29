@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 
@@ -10,7 +11,9 @@ import (
 const (
 	deleteNamespaceDanger = "kubectl delete namespace apaga tudo o que está dentro do namespace."
 	deleteAllDanger       = "kubectl delete --all apaga todos os recursos do tipo (apague pelo nome)."
+	deleteAllNsDanger     = "kubectl delete -A (--all-namespaces) apaga em todos os namespaces do cluster, não só no atual."
 	deleteDataDanger      = "kubectl delete de PVC/PV apaga o volume e os dados persistentes dentro dele."
+	deleteCRDDanger       = "kubectl delete de CustomResourceDefinition apaga também todos os recursos criados a partir dela, em todos os namespaces."
 	drainDanger           = "kubectl drain expulsa todos os pods do nó."
 	scaleZeroDanger       = "kubectl scale --replicas=0 derruba todas as réplicas: o serviço fica fora do ar."
 	replaceForceDanger    = "kubectl replace --force apaga e recria o recurso: perde estado e causa indisponibilidade."
@@ -47,11 +50,17 @@ func matchKubectl(tokens []string) (string, bool) {
 		if slices.ContainsFunc(tokens, isAllFlag) {
 			return deleteAllDanger, true
 		}
+		if slices.ContainsFunc(tokens, isAllNamespacesFlag) {
+			return deleteAllNsDanger, true
+		}
 		if slices.ContainsFunc(args[verb+1:], isNamespaceKind) {
 			return deleteNamespaceDanger, true
 		}
 		if slices.ContainsFunc(args[verb+1:], isDataKind) {
 			return deleteDataDanger, true
+		}
+		if slices.ContainsFunc(args[verb+1:], isCRDKind) {
+			return deleteCRDDanger, true
 		}
 	case "scale":
 		if scalesToZero(tokens) {
@@ -72,6 +81,20 @@ func isDataKind(kinds string) bool {
 		switch strings.ToLower(kind) {
 		case "pvc", "persistentvolumeclaim", "persistentvolumeclaims",
 			"pv", "persistentvolume", "persistentvolumes":
+			return true
+		}
+	}
+	return false
+}
+
+// isCRDKind reconhece "crd", "crds", "customresourcedefinition(s)" e "crd/nome",
+// também com grupo ("crd.apiextensions.k8s.io").
+func isCRDKind(kinds string) bool {
+	for _, kind := range strings.Split(kinds, ",") {
+		kind, _, _ = strings.Cut(kind, "/")
+		kind, _, _ = strings.Cut(strings.ToLower(kind), ".")
+		switch kind {
+		case "crd", "crds", "customresourcedefinition", "customresourcedefinitions":
 			return true
 		}
 	}
@@ -160,20 +183,23 @@ func kubectlDeleteFiles(tokens []string) (targets []string, isDelete bool) {
 	return targets, true
 }
 
-// dangerousManifestKind procura kind: Namespace, PersistentVolumeClaim ou
-// PersistentVolume num manifesto YAML (um ou vários documentos).
+// manifestKindPattern pega kind: X (YAML), "kind": "X" (JSON, inclusive em
+// uma linha só) e kind: X dentro de "- " ou de uma lista (kind: List).
+var manifestKindPattern = regexp.MustCompile(`(?i)(?:^|[\s{,\-])["']?kind["']?\s*:\s*["']?([A-Za-z]+)`)
+
+// dangerousManifestKind procura kind: Namespace, PersistentVolumeClaim,
+// PersistentVolume ou CustomResourceDefinition num manifesto YAML ou JSON (um
+// ou vários documentos). Outros kinds (Deployment, Service...) ficam de fora,
+// como no kubectl delete deploy NOME, que também é permitido.
 func dangerousManifestKind(data []byte) (string, bool) {
-	for _, line := range strings.Split(string(data), "\n") {
-		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "kind:")
-		if !ok {
-			continue
-		}
-		kind := strings.ToLower(strings.Trim(strings.TrimSpace(rest), `"'`))
-		switch kind {
+	for _, m := range manifestKindPattern.FindAllSubmatch(data, -1) {
+		switch strings.ToLower(string(m[1])) {
 		case "namespace":
 			return deleteNamespaceDanger, true
 		case "persistentvolumeclaim", "persistentvolume":
 			return deleteDataDanger, true
+		case "customresourcedefinition":
+			return deleteCRDDanger, true
 		}
 	}
 	return "", false
@@ -197,6 +223,11 @@ var kubectlVerbs = set(
 // isAllFlag: --all e --all=true, não --all-namespaces.
 func isAllFlag(arg string) bool {
 	return arg == "--all" || arg == "--all=true"
+}
+
+// isAllNamespacesFlag: -A, --all-namespaces e --all-namespaces=true.
+func isAllNamespacesFlag(arg string) bool {
+	return arg == "-A" || arg == "--all-namespaces" || arg == "--all-namespaces=true"
 }
 
 // isNamespaceKind aceita "ns", "namespaces", "namespace/prod" e "ns,pods".

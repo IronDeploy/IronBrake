@@ -17,6 +17,7 @@ type Env struct {
 	PolicyError bool     // policy.yaml com erro: tudo é produção e crítico
 
 	Cwd      string                            // pasta do comando, para resolver caminhos relativos
+	DataDir  string                            // TF_DATA_DIR ("" = .terraform), para achar o workspace do terraform
 	ReadFile func(path string) ([]byte, error) // lê um arquivo local (safefile); nil = sem leitura
 }
 
@@ -51,7 +52,8 @@ func (e Env) isProduction(commands [][]string) bool {
 			return true
 		}
 	}
-	return false
+	// terraform -chdir=infra e cd infra: o workspace é o daquela pasta.
+	return e.Policy.IsProduction(e.workspaceTexts(commands)...)
 }
 
 func (e Env) isCritical(resourceType string) bool {

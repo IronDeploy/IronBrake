@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 	"unicode"
@@ -8,7 +9,7 @@ import (
 	"github.com/IronDeploy/IronBrake/internal/hook"
 )
 
-const sqlDestructiveDanger = "SQL destrutivo (DROP DATABASE/SCHEMA/TABLE, TRUNCATE ou DELETE sem WHERE)."
+const sqlDestructiveDanger = "SQL destrutivo (DROP DATABASE/SCHEMA/TABLE, TRUNCATE ou DELETE sem WHERE, ou com WHERE sempre verdadeiro, como 1=1)."
 
 // Sem um cliente SQL na linha, SQL é só texto (grep, mensagem de commit).
 var sqlClients = []string{
@@ -157,16 +158,169 @@ func hasDestructiveSQL(text string) bool {
 		case "TRUNCATE":
 			return true
 		case "DELETE":
-			if !slices.Contains(words, "WHERE") {
+			if deletesEverything(statement) {
 				return true
 			}
 		case "WITH": // WITH x AS (DELETE FROM users) SELECT ...
-			if i := slices.Index(words, "DELETE"); i >= 0 && !slices.Contains(words[i:], "WHERE") {
+			if loc := deleteWord.FindStringIndex(strings.ToUpper(statement)); loc != nil && deletesEverything(statement[loc[0]:]) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+var (
+	deleteWord = regexp.MustCompile(`\bDELETE\b`)
+	whereWord  = regexp.MustCompile(`\bWHERE\b`)
+	// depois do filtro, o DELETE ainda pode ter RETURNING, ORDER BY ou LIMIT.
+	afterFilter = regexp.MustCompile(`\b(?:RETURNING|ORDER\s+BY|LIMIT)\b`)
+)
+
+// deletesEverything: o DELETE não tem WHERE, ou o WHERE vale para todas as
+// linhas (WHERE 1=1, WHERE TRUE, WHERE id=1 OR 1=1).
+func deletesEverything(statement string) bool {
+	upper := strings.ToUpper(statement)
+	loc := whereWord.FindStringIndex(upper)
+	if loc == nil {
+		return true
+	}
+	cond := upper[loc[1]:]
+	if end := afterFilter.FindStringIndex(cond); end != nil {
+		cond = cond[:end[0]]
+	}
+	return alwaysTrue(cutAtUnmatchedParen(cond))
+}
+
+// cutAtUnmatchedParen corta no ")" que fecha um WITH x AS (DELETE ...).
+func cutAtUnmatchedParen(s string) string {
+	depth := 0
+	for i, r := range s {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			if depth == 0 {
+				return s[:i]
+			}
+			depth--
+		}
+	}
+	return s
+}
+
+// alwaysTrue reconhece condições que valem para toda linha: literais
+// (TRUE, 1), igualdades de um valor com ele mesmo (1=1, 'a'='a', id=id),
+// desigualdades óbvias (1<>0), NOT FALSE, e OR com qualquer termo assim.
+// AND só vale se todos os termos valem. Na dúvida, diz que não.
+func alwaysTrue(cond string) bool {
+	cond = strings.TrimSpace(cond)
+	for len(cond) > 1 && cond[0] == '(' && matchingParen(cond) == len(cond)-1 {
+		cond = strings.TrimSpace(cond[1 : len(cond)-1])
+	}
+	if cond == "" {
+		return false
+	}
+	if parts := splitTopLevel(cond, "OR"); len(parts) > 1 {
+		return slices.ContainsFunc(parts, alwaysTrue)
+	}
+	if parts := splitTopLevel(cond, "AND"); len(parts) > 1 {
+		return !slices.ContainsFunc(parts, func(p string) bool { return !alwaysTrue(p) })
+	}
+	return atomAlwaysTrue(cond)
+}
+
+var (
+	sqlTrueLiteral = regexp.MustCompile(`^(?:TRUE|[1-9][0-9]*|NOT\s+(?:FALSE|0))$`)
+	sqlComparison  = regexp.MustCompile(`^(.+?)\s*(==|<>|!=|=)\s*(.+)$`)
+)
+
+func atomAlwaysTrue(atom string) bool {
+	if sqlTrueLiteral.MatchString(atom) {
+		return true
+	}
+	m := sqlComparison.FindStringSubmatch(atom)
+	if m == nil {
+		return false
+	}
+	left, op, right := strings.TrimSpace(m[1]), m[2], strings.TrimSpace(m[3])
+	if !isSQLValue(left) || !isSQLValue(right) {
+		return false
+	}
+	if op == "=" || op == "==" {
+		return left == right
+	}
+	return left != right && isSQLLiteral(left) && isSQLLiteral(right)
+}
+
+var (
+	sqlLiteral    = regexp.MustCompile(`^(?:[0-9]+(?:\.[0-9]+)?|'[^']*')$`)
+	sqlIdentifier = regexp.MustCompile(`^[A-Z_][A-Z0-9_$]*(?:\.[A-Z_][A-Z0-9_$]*)?$`)
+)
+
+func isSQLLiteral(v string) bool { return sqlLiteral.MatchString(v) }
+
+// isSQLValue: literal ou nome de coluna, sem chamada de função nem operação.
+func isSQLValue(v string) bool { return isSQLLiteral(v) || sqlIdentifier.MatchString(v) }
+
+// matchingParen devolve a posição do ")" que fecha o "(" de s[0], ou -1.
+func matchingParen(s string) int {
+	depth := 0
+	inString := false
+	for i, r := range s {
+		switch {
+		case r == '\'':
+			inString = !inString
+		case inString:
+		case r == '(':
+			depth++
+		case r == ')':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// splitTopLevel divide por uma palavra (AND, OR) fora de parênteses e de
+// texto entre aspas simples.
+func splitTopLevel(cond, word string) []string {
+	var parts []string
+	depth, start := 0, 0
+	inString := false
+	for i := 0; i < len(cond); i++ {
+		switch c := cond[i]; {
+		case c == '\'':
+			inString = !inString
+		case inString:
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+		case depth == 0 && isWordAt(cond, i, word):
+			parts = append(parts, cond[start:i])
+			start = i + len(word)
+			i += len(word) - 1
+		}
+	}
+	return append(parts, cond[start:])
+}
+
+// isWordAt: word começa em i e está cercada por não-letras.
+func isWordAt(s string, i int, word string) bool {
+	if !strings.HasPrefix(s[i:], word) {
+		return false
+	}
+	isName := func(b byte) bool {
+		return b == '_' || b >= '0' && b <= '9' || b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z'
+	}
+	if i > 0 && isName(s[i-1]) {
+		return false
+	}
+	end := i + len(word)
+	return end == len(s) || !isName(s[end])
 }
 
 // stripSQLComments tira -- e /* */, sem mexer em texto entre aspas simples.

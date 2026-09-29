@@ -148,3 +148,54 @@ func TestIsProduction(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadAuditLogDefaultsToZero(t *testing.T) {
+	p, err := Load(writePolicy(t, "production_patterns:\n  - live\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.AuditLog != (AuditLog{}) {
+		t.Errorf("sem audit_log deveria valer o padrão (zero), obtive %+v", p.AuditLog)
+	}
+}
+
+func TestLoadAuditLogCustom(t *testing.T) {
+	p, err := Load(writePolicy(t, "audit_log:\n  max_size_mb: 20\n  keep: 10\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (AuditLog{MaxSizeMB: 20, Keep: 10}); p.AuditLog != want {
+		t.Errorf("esperava %+v, obtive %+v", want, p.AuditLog)
+	}
+
+	// Cada campo é opcional; os limites valem no mínimo e no máximo.
+	for _, content := range []string{
+		"audit_log:\n  keep: 30\n",
+		"audit_log:\n  max_size_mb: 5\n  keep: 5\n",
+		"audit_log:\n  max_size_mb: 100\n  keep: 100\n",
+	} {
+		if _, err := Load(writePolicy(t, content)); err != nil {
+			t.Errorf("%q deveria valer: %v", content, err)
+		}
+	}
+}
+
+func TestLoadAuditLogCannotShrinkWhatTheLogKeeps(t *testing.T) {
+	cases := map[string]string{
+		"keep abaixo do padrão":     "audit_log:\n  keep: 2\n",
+		"tamanho abaixo do padrão":  "audit_log:\n  max_size_mb: 1\n",
+		"negativo":                  "audit_log:\n  keep: -1\n",
+		"acima do teto (keep)":      "audit_log:\n  keep: 101\n",
+		"acima do teto (tamanho)":   "audit_log:\n  max_size_mb: 1000\n",
+		"texto no lugar do número":  "audit_log:\n  keep: muitos\n",
+		"chave desconhecida dentro": "audit_log:\n  keeep: 10\n",
+		"audit_log virou lista":     "audit_log:\n  - keep\n",
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(writePolicy(t, content)); err == nil {
+				t.Error("esperava erro, obtive nil")
+			}
+		})
+	}
+}

@@ -18,8 +18,8 @@ func Collect(cwd string, getenv func(string) string, readFile func(string) ([]by
 	texts := []string{cwd}
 
 	// terraform workspace select grava o nome aqui.
-	if data, err := readFile(filepath.Join(cwd, ".terraform", "environment")); err == nil {
-		texts = appendText(texts, string(data))
+	if name, ok := Workspace(cwd, getenv("TF_DATA_DIR"), readFile); ok {
+		texts = append(texts, name)
 	}
 
 	if context := kubeContext(getenv, readFile); context != "" {
@@ -30,6 +30,23 @@ func Collect(cwd string, getenv func(string) string, readFile func(string) ([]by
 		texts = appendText(texts, getenv(name))
 	}
 	return texts
+}
+
+// Workspace lê o workspace escolhido (terraform workspace select) na pasta dir.
+// dataDir é o TF_DATA_DIR ("" = .terraform); relativo, vale a partir de dir.
+func Workspace(dir, dataDir string, readFile func(string) ([]byte, error)) (string, bool) {
+	if dataDir == "" {
+		dataDir = ".terraform"
+	}
+	if !filepath.IsAbs(dataDir) {
+		dataDir = filepath.Join(dir, dataDir)
+	}
+	data, err := readFile(filepath.Join(dataDir, "environment"))
+	if err != nil {
+		return "", false
+	}
+	name := strings.TrimSpace(string(data))
+	return name, name != ""
 }
 
 // kubeContext lê o current-context do primeiro arquivo do KUBECONFIG que

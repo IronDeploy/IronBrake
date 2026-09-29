@@ -6,10 +6,10 @@ import (
 )
 
 const (
-	dockerPruneDanger       = "docker prune apaga em massa contêineres, imagens ou volumes parados."
+	dockerPruneDanger       = "docker prune apaga em massa contêineres, imagens ou volumes parados: dados de volumes sem uso no momento (como um banco parado) somem sem volta."
 	dockerVolumeRmDanger    = "remover um volume do Docker apaga os dados persistentes dentro dele."
 	dockerComposeDownDanger = "docker compose down -v apaga os volumes nomeados e os dados dentro deles."
-	dockerForceRmDanger     = "docker rm -f remove um contêiner em execução na hora."
+	dockerForceRmDanger     = "docker rm -f remove um contêiner em execução na hora: o serviço cai e o que ele estava processando ou guardando só no contêiner se perde."
 )
 
 var containerDelete = dangerRule{name: "container-delete", match: matchContainer}

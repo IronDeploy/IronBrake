@@ -6,8 +6,8 @@ import (
 )
 
 const (
-	cloudDeleteDanger  = "o comando de nuvem apaga ou encerra recursos."
-	cloudStorageDanger = "o comando apaga objetos em massa ou um bucket inteiro de armazenamento na nuvem."
+	cloudDeleteDanger  = "o comando de nuvem apaga ou encerra recursos: serviços podem sair do ar e dados podem ser perdidos, muitas vezes sem volta."
+	cloudStorageDanger = "o comando apaga objetos em massa ou um bucket inteiro de armazenamento na nuvem: arquivos, backups e logs somem, e sem versionamento não voltam."
 )
 
 var cloudDelete = dangerRule{name: "cloud-delete", match: matchCloudDelete}

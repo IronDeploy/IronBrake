@@ -11,6 +11,25 @@ func TestNormalizeSameCommand(t *testing.T) {
 		`  terraform apply 'tfplan'  `,
 	}
 
+	// Só o número muda: o agente em loop refaz o plano com outro nome.
+	sameNumbers := []string{
+		`terraform apply plan1`,
+		`terraform apply plan2`,
+		`terraform apply plan10`,
+		`terraform apply "PLAN1"`,
+	}
+	for _, command := range []string{`terraform apply plan-20260929-1030`, `terraform apply plan-1-2`} {
+		if got, want := Normalize(command), "terraform apply plan-#-#"; got != want {
+			t.Errorf("%q: esperava %q, obtive %q", command, want, got)
+		}
+	}
+	wantNumbers := Normalize(sameNumbers[0])
+	for _, command := range sameNumbers[1:] {
+		if got := Normalize(command); got != wantNumbers {
+			t.Errorf("%q: esperava %q, obtive %q", command, wantNumbers, got)
+		}
+	}
+
 	want := Normalize(same[0])
 	for _, command := range same[1:] {
 		if got := Normalize(command); got != want {
@@ -23,6 +42,9 @@ func TestNormalizeDifferentCommands(t *testing.T) {
 	different := []string{
 		`terraform apply tfplan`,
 		`terraform apply outro.tfplan`,
+		`terraform apply -target=aws_instance.web tfplan`,
+		`terraform destroy`,
+		`terraform apply plan1 && terraform apply plan2`,
 		`terraform plan -out=tfplan`,
 		`terraform apply tfplan && kubectl get pods`,
 	}

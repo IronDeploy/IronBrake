@@ -46,23 +46,38 @@ production_patterns:        # só palavras de letras
   - live
 critical_resource_types:
   - google_sql_database_instance
+audit_log:                  # rotação do log de auditoria (ver abaixo)
+  max_size_mb: 20           # de 5 a 100; tamanho de cada arquivo antes de girar (padrão 5)
+  keep: 10                  # de 5 a 100; arquivos antigos guardados (padrão 5)
 ```
 
 - **Sem arquivo:** vale a padrão — `production_patterns: prod, production, prd`;
   `critical_resource_types: aws_db_instance, aws_rds_cluster, aws_s3_bucket, aws_eks_cluster`.
 - **Com arquivo:** a padrão **mais** o arquivo. Os padrões embutidos nunca
   saem (um agente, ou um erro de digitação, não desliga a proteção).
+- **`audit_log` só aumenta:** os dois campos são opcionais e aceitam de 5 a 100
+  (o padrão é o piso). Valor menor que o padrão, acima de 100 ou que não é
+  número é erro do arquivo, como os outros: senão um projeto de terceiros, ou
+  um agente que edita o arquivo, encolheria o rastro de auditoria.
 - **Arquivo com erro** (YAML inválido, chave desconhecida, lista virou texto,
-  padrão com símbolo, arquivo ilegível): **tudo é produção** e todo tipo de
+  padrão com símbolo, `audit_log` fora dos limites, arquivo ilegível): **tudo é produção** e todo tipo de
   recurso é crítico. Comandos inofensivos continuam liberados; o motivo do
   deny avisa que o arquivo precisa ser corrigido.
+- **Programas executados:** o `terraform show` roda o programa de
+  `tools.terraform` (também `tofu`, `terragrunt`) do **`~/.iron/config.yaml`**,
+  que é do usuário e não do projeto (o hook executa o que ele indica; um
+  arquivo de projeto não pode escolher isso). Sem configuração, vale o do
+  `PATH`, recusado se estiver dentro do projeto ou se o arquivo ou a pasta
+  forem graváveis por qualquer usuário (com o projeto aberto na home, a regra
+  do projeto não se aplica: `~/bin` estaria sempre "dentro").
 - **Local:** `$CLAUDE_PROJECT_DIR/.iron/policy.yaml` (variável que o Claude
   Code passa ao hook); sem ela, a pasta do comando.
 
 **Produção** = um padrão aparece como **palavra inteira** (letras; qualquer
 outro caractere separa; sem diferenciar maiúsculas) no comando (todos os
 comandos da linha) ou no contexto atual: pasta do comando, workspace do
-terraform (`.terraform/environment` e `TF_WORKSPACE`), `current-context` do
+terraform (`.terraform/environment`, na pasta do comando, na de `-chdir` e na
+de `cd`, com `TF_DATA_DIR`; e `TF_WORKSPACE`), `current-context` do
 kubectl (`KUBECONFIG` ou `~/.kube/config`), `AWS_PROFILE`,
 `AWS_DEFAULT_PROFILE`, `CLOUDSDK_ACTIVE_CONFIG_NAME`, `CLOUDSDK_CORE_PROJECT`.
 `prod-eu`, `eks_prd1` e `/envs/production/` batem; `product-api` não.
@@ -157,7 +172,17 @@ escreve):
 - `prev`: SHA-256 da linha anterior (vazio na primeira). `iron audit verify`
   confere a corrente.
 - **Nunca** o comando nem valores de segredos.
-- Falha ao gravar o log **não muda a decisão** (aviso no stderr).
+- Falha ao gravar o log **não muda a decisão** (aviso no stderr), mas deixa um
+  marcador (`audit.log.error`, com a hora e o motivo) que o `iron doctor`
+  mostra até a próxima gravação que der certo.
+- **Rotação:** passando de 5 MB, `audit.log` vira `audit.log.1` (e os antigos
+  sobem: `.1`→`.2`…); ficam 5 rotacionados, no máximo ~30 MB. A primeira
+  linha do arquivo novo aponta para a última do que saiu, então a corrente
+  continua. Ao apagar o mais antigo, o hash da última linha dele vai para
+  `audit.log.anchor`, que a primeira linha do que sobrou deve apontar.
+  `iron audit verify` confere todos os arquivos, do mais antigo ao atual.
+  Tamanho e quantidade podem ser aumentados pelo `audit_log` do
+  `.iron/policy.yaml` (só para mais, até 100 MB × 100 arquivos).
 
 ## Janela para todo ask
 

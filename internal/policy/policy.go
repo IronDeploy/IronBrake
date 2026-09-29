@@ -20,7 +20,23 @@ import (
 type Policy struct {
 	ProductionPatterns    []string `yaml:"production_patterns"`
 	CriticalResourceTypes []string `yaml:"critical_resource_types"`
+	AuditLog              AuditLog `yaml:"audit_log"`
 }
+
+// AuditLog personaliza a rotação do log de auditoria. Zero (ou ausente) é o
+// padrão. Como o resto do arquivo, só soma: o arquivo pode guardar mais que o
+// padrão, nunca menos, senão um projeto de terceiros (ou um agente que edita o
+// arquivo) encolheria o rastro de auditoria.
+type AuditLog struct {
+	MaxSizeMB int `yaml:"max_size_mb"` // tamanho de cada arquivo antes de girar
+	Keep      int `yaml:"keep"`        // arquivos antigos guardados
+}
+
+const (
+	AuditDefaultMaxSizeMB = 5
+	AuditDefaultKeep      = 5
+	AuditLimit            = 100 // teto de cada campo: o disco não enche por engano
+)
 
 // Default é a política embutida, à qual o arquivo sempre soma.
 func Default() Policy {
@@ -55,6 +71,7 @@ func Load(dir string) (Policy, error) {
 	p := Default()
 	p.ProductionPatterns = append(p.ProductionPatterns, extra.ProductionPatterns...)
 	p.CriticalResourceTypes = append(p.CriticalResourceTypes, extra.CriticalResourceTypes...)
+	p.AuditLog = extra.AuditLog
 	return p, nil
 }
 
@@ -72,7 +89,23 @@ func parse(data []byte) (Policy, error) {
 			return Policy{}, errors.New("production_patterns aceita só palavras de letras (ex.: live)")
 		}
 	}
+	if err := validateAuditLog(p.AuditLog); err != nil {
+		return Policy{}, err
+	}
 	return p, nil
+}
+
+func validateAuditLog(a AuditLog) error {
+	check := func(name string, value, minimum int) error {
+		if value != 0 && (value < minimum || value > AuditLimit) {
+			return fmt.Errorf("audit_log.%s vai de %d a %d: o arquivo só soma à política padrão e não reduz o que o log guarda", name, minimum, AuditLimit)
+		}
+		return nil
+	}
+	if err := check("max_size_mb", a.MaxSizeMB, AuditDefaultMaxSizeMB); err != nil {
+		return err
+	}
+	return check("keep", a.Keep, AuditDefaultKeep)
 }
 
 // IsProduction procura os padrões como palavra inteira, sem diferenciar
