@@ -11,7 +11,11 @@ curl -fsSL https://github.com/IronDeploy/IronBrake/releases/latest/download/inst
 ```
 
 O script descobre o seu sistema, baixa o binário, **confere o SHA-256** e
-instala em `~/.local/bin/iron`, sem `sudo`. Se preferir ler antes de rodar:
+instala em `~/.local/bin/iron`, sem `sudo`. Se essa pasta não estiver no PATH, o
+instalador a adiciona ao perfil do seu shell (`~/.zshrc` no zsh; `~/.bash_profile`
+no bash do macOS; `~/.bashrc` no bash do Linux; fish via `fish_add_path`). Abra um
+novo terminal depois. Para não alterar o perfil, use `IRON_NO_MODIFY_PATH=1`.
+Se preferir ler antes de rodar:
 baixe o `install.sh` da [página de releases](https://github.com/IronDeploy/IronBrake/releases),
 leia e rode com `sh install.sh`. No Windows, baixe o `iron_windows_amd64.exe`
 (ou `arm64`) da mesma página. Com Go instalado:

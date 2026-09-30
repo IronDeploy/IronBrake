@@ -8,6 +8,8 @@
 # Variáveis opcionais:
 #   IRON_VERSION=v0.1.0         instala uma versão específica (padrão: a mais recente)
 #   IRON_INSTALL_DIR=/pasta     onde instalar (padrão: ~/.local/bin)
+#   IRON_NO_MODIFY_PATH=1       não altera o perfil do shell (~/.zshrc, ~/.bashrc...)
+#                               para pôr a pasta de instalação no PATH
 #   IRON_BASE_URL=http://...    baixa de outro lugar (para testar sem o GitHub)
 #   IRON_VERIFY_ATTESTATION=1   exige a verificação do atestado de proveniência
 #                               (precisa do gh, GitHub CLI, com login). Sem isso,
@@ -86,9 +88,55 @@ mv "$tmp/$file" "$INSTALL_DIR/iron"
 "$INSTALL_DIR/iron" version
 
 echo "iron: instalado em $INSTALL_DIR/iron"
+
+# PATH: se a pasta de instalação não estiver no PATH, coloca no perfil do shell
+# certo para o sistema (o macOS não tem ~/.local/bin no PATH por padrão, e o
+# Terminal dele abre shells de login). Um `curl | sh` não altera o shell aberto,
+# então no fim avisa para abrir um novo terminal.
+path_line="export PATH=\"$INSTALL_DIR:\$PATH\""
 case ":$PATH:" in
-*":$INSTALL_DIR:"*) ;;
-*) echo "iron: atenção: $INSTALL_DIR não está no PATH. Adicione ao seu ~/.zshrc ou ~/.bashrc:
-      export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
+*":$INSTALL_DIR:"*) need_restart=0 ;;
+*)
+	need_restart=1
+	shell_name="$(basename "${SHELL:-sh}")"
+	profile=""
+	case "$shell_name" in
+	zsh) profile="${ZDOTDIR:-$HOME}/.zshrc" ;;
+	bash)
+		if [ "$os" = darwin ]; then
+			profile="$HOME/.bash_profile"
+		else
+			profile="$HOME/.bashrc"
+		fi
+		;;
+	fish)
+		if command -v fish >/dev/null 2>&1 && fish -c "fish_add_path -U '$INSTALL_DIR'" >/dev/null 2>&1; then
+			echo "iron: $INSTALL_DIR adicionado ao PATH do fish"
+			profile="fish"
+		fi
+		;;
+	esac
+
+	if [ "${IRON_NO_MODIFY_PATH:-}" = "1" ]; then
+		echo "iron: $INSTALL_DIR não está no PATH (IRON_NO_MODIFY_PATH=1, não alterei nada). Adicione:"
+		echo "      $path_line"
+	elif [ "$profile" = "fish" ]; then
+		:
+	elif [ -n "$profile" ]; then
+		if grep -qsF "$path_line" "$profile"; then
+			echo "iron: $INSTALL_DIR já está configurado em $profile"
+		else
+			printf '\n# iron\n%s\n' "$path_line" >>"$profile"
+			echo "iron: $INSTALL_DIR adicionado ao PATH em $profile"
+		fi
+	else
+		echo "iron: atenção: $INSTALL_DIR não está no PATH e não reconheci o seu shell ($shell_name). Adicione ao perfil dele:"
+		echo "      $path_line"
+	fi
+	;;
 esac
+
+if [ "$need_restart" = 1 ]; then
+	echo "iron: abra um novo terminal (ou rode:  export PATH=\"$INSTALL_DIR:\$PATH\") para usar o comando iron"
+fi
 echo "iron: próximo passo, na pasta do seu projeto:  iron init && iron doctor"
