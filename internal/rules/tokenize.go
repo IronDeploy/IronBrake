@@ -323,6 +323,9 @@ var wrappers = map[string]wrapper{
 	"timeout":    {valueFlags: set("-s", "-k", "--signal", "--kill-after"), skipArgs: 1},
 	"stdbuf":     {valueFlags: set("-i", "-o", "-e")},
 	"caffeinate": {valueFlags: set("-t", "-w")},
+	"npx":        {valueFlags: set("-p", "--package", "-c", "--call")},
+	"pnpx":       {valueFlags: set("-p", "--package")},
+	"bunx":       {valueFlags: set("-p", "--package")},
 	"xargs":      {valueFlags: set("-I", "-n", "-P", "-L", "-d", "-a", "-E", "-s", "--max-args", "--max-procs", "--delimiter", "--arg-file", "--replace", "--max-lines")},
 }
 

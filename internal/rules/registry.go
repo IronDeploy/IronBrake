@@ -14,6 +14,8 @@ var registry = []Rule{
 	kubectlDeleteWorkload,
 	helmDestructive,
 	cloudDelete,
+	iacDestructive,
+	awsCredentialExport,
 	sqlDestructive,
 	fsCatastrophic,
 	fsDangerous,

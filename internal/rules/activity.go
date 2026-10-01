@@ -9,6 +9,7 @@ import (
 // infraPrograms mexem em infraestrutura, assim como clientes SQL e git push.
 var infraPrograms = []string{
 	"terraform", "tofu", "terragrunt", "kubectl", "helm", "aws", "az", "gcloud", "gsutil",
+	"cdk", "cdktf", "sam", "eksctl", "pulumi", "serverless", "sls",
 }
 
 // Normalize devolve a forma canônica da linha, para comparar repetições:
@@ -132,7 +133,7 @@ func classifyCommand(tokens []string) string {
 		if args := positionals(tokens[1:], nil); len(args) > 0 {
 			sub = args[0]
 		}
-	case "tofu", "terragrunt", "aws", "az", "gcloud":
+	case "tofu", "terragrunt", "aws", "az", "gcloud", "cdk", "cdktf", "sam", "eksctl", "pulumi", "serverless", "sls":
 		return program
 	default:
 		return "outro"
