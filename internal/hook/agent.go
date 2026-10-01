@@ -76,7 +76,7 @@ func (c Capabilities) Budget() Budget {
 // DefaultAgent é o agente de "iron hook" sem --agent.
 const DefaultAgent = "claude"
 
-var agents = []Agent{Claude}
+var agents = []Agent{Claude, Kiro}
 
 // Lookup acha o agente pelo nome, sem diferenciar maiúsculas.
 func Lookup(name string) (Agent, error) {

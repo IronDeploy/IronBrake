@@ -1,0 +1,1 @@
+{"session_id":"sess_34ca342c-4ef7-4a12-9467-b5d874a946a1","hook_event_name":"PreToolUse","cwd":"/home/dev/projeto","tool_name":"execute_bash","tool_input":{"command":"echo oi","description":null,"cwd":null,"run_in_background":false,"timeout":null}}

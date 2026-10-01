@@ -57,7 +57,7 @@ func Run(settingsPath, version string, timeout time.Duration) []Result {
 		hookTimeout = checkTimeout(chosen.Timeout)
 
 		if binary.OK {
-			responds = checkResponds(chosen.Command, timeout)
+			responds = checkResponds(chosen.Command, []string{setup.HookSubcommand}, testEvent, timeout)
 		} else {
 			responds = notChecked(nameResponds, 2)
 		}
@@ -377,16 +377,16 @@ func checkBinary(command string) Result {
 	return result
 }
 
-// checkResponds roda o hook como o Claude Code faria, sem shell, e exige o
-// código 2 para um force push.
-func checkResponds(command string, timeout time.Duration) Result {
+// checkResponds roda o hook como o agente faria, sem shell, e exige o código 2
+// para um force push. event é o stdin no formato do agente.
+func checkResponds(command string, args []string, event string, timeout time.Duration) Result {
 	result := Result{Name: nameResponds}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, command, setup.HookSubcommand)
-	cmd.Stdin = strings.NewReader(testEvent)
+	cmd := exec.CommandContext(ctx, command, args...)
+	cmd.Stdin = strings.NewReader(event)
 	cmd.WaitDelay = time.Second
 	err := cmd.Run()
 
@@ -394,7 +394,7 @@ func checkResponds(command string, timeout time.Duration) Result {
 	switch {
 	case ctx.Err() != nil:
 		result.Detail = fmt.Sprintf("o hook não respondeu em %s", timeout)
-		result.Fix = "rode " + command + " hook e veja por que trava; o Claude Code deixa passar o comando de um hook que estoura o tempo."
+		result.Fix = "rode " + command + " hook e veja por que trava; o agente deixa passar o comando de um hook que estoura o tempo."
 	case err == nil:
 		result.Detail = "o hook liberou o force push de teste (saiu com código 0)"
 		result.Fix = "recompile o binário (go build) e rode iron init de novo; este hook NÃO está protegendo."

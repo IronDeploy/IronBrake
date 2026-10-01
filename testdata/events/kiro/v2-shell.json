@@ -1,0 +1,1 @@
+{"hook_event_name":"preToolUse","cwd":"/home/dev/projeto","session_id":"e075b302-baae-491a-b9f0-6a936d898630","tool_name":"shell","tool_input":{"command":"echo oi","__tool_use_purpose":"Execute the exact command requested by the user"}}

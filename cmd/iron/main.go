@@ -43,9 +43,10 @@ const usage = `uso: iron <subcomando>
 
   hook          roda como hook de pré-execução do agente (lê o evento pelo stdin; --agent=claude)
   init          instala o hook em .claude/settings.json da pasta atual e a etiqueta do agente na AWS
+  init --agent=kiro  instala o hook do Kiro CLI (.kiro/agents e .kiro/hooks) na pasta atual
   init --no-aws-tag  instala só o hook, sem gravar AWS_SDK_UA_APP_ID no env do agente
   init --harden grava também regras deny de leitura das credenciais (Iron Shield)
-  doctor        verifica se o hook desta pasta está mesmo protegendo
+  doctor        verifica se o hook desta pasta está mesmo protegendo (--agent=kiro para o Kiro CLI)
   scan          raio-X das credenciais ao alcance do agente (Iron Shield, só leitura)
   scan --manage igual, mas interativo: setas navegam, enter oculta/mostra, esc/q sai
   shield status mostra quais credenciais estão travadas e quais não estão
@@ -79,7 +80,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case "init":
 		return initHere(args[1:], stdout, stderr)
 	case "doctor":
-		return doctorHere(stdout, stderr)
+		return doctorHere(args[1:], stdout, stderr)
 	case "scan":
 		if slices.Contains(args[1:], "--manage") {
 			return runScanManage(stdout, stderr)
@@ -387,6 +388,11 @@ func runAudit(args []string, stdout, stderr io.Writer) int {
 }
 
 func initHere(args []string, stdout, stderr io.Writer) int {
+	agent, err := initAgent(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "iron: %v\n", err)
+		return 2
+	}
 	opts := initOptions{harden: slices.Contains(args, "--harden"), awsTag: !slices.Contains(args, "--no-aws-tag")}
 	dir, err := os.Getwd()
 	if err != nil {
@@ -400,7 +406,52 @@ func initHere(args []string, stdout, stderr io.Writer) int {
 	}
 	// os.Executable() não normaliza: "../bin/iron" vira ".../a/../bin/iron", e o
 	// hook ficaria gravado com esse caminho.
-	return runInit(dir, filepath.Clean(exePath), opts, stdout, stderr)
+	exePath = filepath.Clean(exePath)
+	if agent.Name() == hook.Kiro.Name() {
+		return runInitKiro(dir, exePath, opts, stdout, stderr)
+	}
+	return runInit(dir, exePath, opts, stdout, stderr)
+}
+
+// initAgent lê "--agent=NOME" do "iron init"; sem a opção, vale o padrão.
+func initAgent(args []string) (hook.Agent, error) {
+	name := hook.DefaultAgent
+	for i, arg := range args {
+		if value, ok := strings.CutPrefix(arg, "--agent="); ok {
+			name = value
+		} else if arg == "--agent" && i+1 < len(args) {
+			name = args[i+1]
+		}
+	}
+	return hook.Lookup(name)
+}
+
+// runInitKiro instala o hook do Kiro CLI nos dois formatos (v2 e v3). O shield
+// é do Claude, e a etiqueta da AWS não foi verificada no ambiente do Kiro.
+func runInitKiro(dir, exePath string, opts initOptions, stdout, stderr io.Writer) int {
+	if opts.harden {
+		fmt.Fprintln(stderr, "iron: --harden só vale para o Claude Code (usa regras de permissão dele)")
+		return 2
+	}
+	res, err := setup.InstallKiro(dir, exePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "iron: %v\n", err)
+		return 1
+	}
+	for _, f := range res.Changed {
+		fmt.Fprintf(stdout, "iron: hook do Kiro instalado em %s\n", f)
+	}
+	for _, f := range res.Already {
+		fmt.Fprintf(stdout, "iron: o hook do Kiro já estava em %s\n", f)
+	}
+	for _, f := range res.Skipped {
+		fmt.Fprintf(stdout, "iron: %s está no formato v3; o .kiro/hooks já o cobre\n", f)
+	}
+	fmt.Fprintln(stdout, "iron: aviso: o Kiro CLI v3 em modo não interativo (--no-interactive) não executa hooks; ali o Iron Brake não protege.")
+	if !setup.IsIronBinaryName(exePath) {
+		fmt.Fprintf(stderr, "iron: aviso: o programa se chama %q; o hook funciona, mas o iron doctor só o reconhece se o arquivo se chamar iron (ou iron.exe).\n", filepath.Base(exePath))
+	}
+	return 0
 }
 
 type initOptions struct {
@@ -648,13 +699,40 @@ func envMap(environ []string) map[string]string {
 	return m
 }
 
-func doctorHere(stdout, stderr io.Writer) int {
+func doctorHere(args []string, stdout, stderr io.Writer) int {
+	agent, err := initAgent(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "iron: %v\n", err)
+		return 2
+	}
 	dir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(stderr, "iron: %v\n", err)
 		return 1
 	}
+	if agent.Name() == hook.Kiro.Name() {
+		return runDoctorKiro(dir, stdout)
+	}
+	if _, err := os.Stat(setup.SettingsPath(dir)); err != nil {
+		if _, kiroErr := os.Stat(filepath.Join(dir, ".kiro")); kiroErr == nil {
+			fmt.Fprintln(stderr, "iron: esta pasta tem .kiro e não tem .claude; para o Kiro rode: iron doctor --agent=kiro")
+		}
+	}
 	return runDoctor(dir, stdout)
+}
+
+func runDoctorKiro(dir string, stdout io.Writer) int {
+	extra := doctor.Extra{
+		Log:        audit.Log{Path: audit.DefaultPath()},
+		ConfigPath: toolpath.ConfigPath(),
+		ProjectDir: dir,
+	}
+	results := doctor.RunKiro(dir, version, doctorTimeout, extra)
+	doctor.Print(stdout, results)
+	if !doctor.AllOK(results) {
+		return 1
+	}
+	return 0
 }
 
 // coverageWindow é o quanto o doctor olha para trás ao conferir se o hook está
