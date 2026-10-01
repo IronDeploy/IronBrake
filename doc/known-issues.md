@@ -401,3 +401,43 @@ dois payloads, `ask` sem janela virando bloqueio e corrente do log íntegra; o *
 - **O modelo pode recusar antes do hook:** nos testes o Kiro às vezes se recusou a chamar a ferramenta; isso
   não é o Iron Brake.
 
+## 20. Limites do Antigravity CLI
+
+Verificado com o Antigravity CLI **1.2.14** (macOS, `agy`), em 2026-10-01, com o agente real e o `iron` real: bloqueio de
+`git push --force` e liberação de `git status` no modo interativo e no `-p`, com e sem `--dangerously-skip-permissions`; `ask`
+pela janela do Iron Brake (Executar → o comando roda, Cancelar → bloqueia); prazo de 600 s respeitado; `iron watch --agent=antigravity`
+e a cobertura do doctor (sem lacuna com o hook ativo, uma lacuna acusada com o hook desligado); `agent: antigravity` no log. Em **Linux**
+(Docker, usuário não root) foi verificado o binário `iron` real com o payload capturado; o **agy de verdade não foi rodado em Linux**
+(exigiria o seu login lá). Não verificado: Windows, outras versões.
+
+- **Resposta do hook:** o Iron Brake responde `{"decision":"deny","reason":...}` (exit 0) para bloquear e **não escreve nada** para
+  deixar passar. Qualquer saída de erro (exit ≠ 0, stdout que não é JSON, `{}`, campo desconhecido) **bloqueia**; um `{}` vira deny
+  com motivo vazio. `allow` e saída vazia passam a decisão à permissão do agente (o prompt "Run this command?" continua).
+- **O `ask` não é usado.** No modo normal ele mostra `Reason: ...` ao usuário, mas com `--dangerously-skip-permissions` o comando
+  executa mesmo com `ask` ou `force_ask`. O Iron Brake pergunta na própria janela (macOS) e, sem janela, bloqueia.
+- **Prazo:** padrão 30 s, em segundos, campo `timeout`. Estourado, o agente **mata o hook e bloqueia** o comando (não é falha
+  aberta), mas 30 s cortariam a janela de confirmação (480 s): o `iron init` grava `timeout: 600` e o doctor falha se faltar.
+- **`hooks.json` inválido = hook desligado em silêncio, e o comando executa** (verificado com aprovação automática). O doctor valida
+  o arquivo; o `init` recusa-se a sobrescrever um arquivo inválido.
+- **Confiança na pasta:** no modo interativo o agente pergunta "Do you trust the contents of this project?" e só então roda o hook.
+  O `-p` rodou o hook sem essa pergunta. O prompt de confiança e a opção "always allow ... (Persist to settings.json)" são do usuário.
+- **Hook global:** `~/.gemini/config/hooks.json` também é lido. O `init` só grava no projeto; um hook global do Iron Brake junto com
+  o do projeto o rodaria duas vezes por comando.
+- **Pasta do projeto:** o hook roda com `pwd` em `.agents/`; não há variável com a raiz (só `ANTIGRAVITY_CONVERSATION_ID`). Dentro de
+  um `workspacePaths` vale a raiz dele; fora de todos, vale o `Cwd` do comando.
+- **Matcher:** `run_command` (nome exato; o agy aceita também `a|b`, regex e `*`). Só `run_command` e `view_file` foram observados;
+  outras ferramentas que executem comandos (se existirem) não foram enumeradas.
+- **`iron watch --agent=antigravity`** lê `~/.gemini/antigravity-cli/brain/<conversa>/.system_generated/logs/transcript_full.jsonl`
+  (uma pasta só para todos os projetos: só contam os comandos cujo `Cwd` está na pasta atual; `--all` tira o filtro). O `created_at` do passo
+  de resultado é o **início** dele (o hook espera o clique na janela e grava depois), então a chamada só termina na resposta seguinte do
+  modelo (passo n+2). O horário tem precisão de 1 s. Num passo com mais de uma chamada só a primeira é conferida. Não vê o que roda fora
+  do `agy` nem comandos sem `Cwd`.
+- **Etiqueta da AWS:** o Antigravity não tem onde gravar variáveis de ambiente (o `settings.json` é global e não tem chave `env`). O
+  `iron init --agent=antigravity` só **informa** o comando: exporte `AWS_SDK_UA_APP_ID=iron-antigravity` no terminal antes de abrir o
+  `agy` (verificado: ele repassa o ambiente aos comandos). O prefixo `iron-` do alerta do CloudTrail já casa. Não verificado com chamadas
+  reais à AWS.
+- **Fora do escopo:** `--harden` (o Iron Shield usa regras de permissão do Claude).
+- **O modelo pode recusar antes do hook:** nos testes o agy às vezes se recusou a chamar a ferramenta; isso não é o Iron Brake.
+- **Gemini CLI:** o Homebrew o marca como sem suporte do projeto (desativado em 2026-12-18) e indica o Antigravity. O Gemini CLI não
+  foi integrado.
+

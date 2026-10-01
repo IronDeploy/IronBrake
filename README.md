@@ -1,7 +1,7 @@
 # Iron Brake
 
 O Iron Brake é um freio para agentes de IA no terminal. Ele roda como hook do
-agente (Claude Code ou Kiro CLI) e analisa cada comando **antes** de ele executar: libera o que é
+agente (Claude Code, Kiro CLI ou Antigravity CLI) e analisa cada comando **antes** de ele executar: libera o que é
 seguro, pede sua confirmação para o que é arriscado e bloqueia o que destrói.
 
 ## Instalação (macOS e Linux)
@@ -182,6 +182,7 @@ normal ou pede que você mesmo rode o comando).
 |---|---|---|
 | Claude Code | `iron init` | suportado |
 | Kiro CLI (engines v2 e v3, uso interativo e v2 não interativo) | `iron init --agent=kiro` e `iron doctor --agent=kiro` | suportado, verificado com o Kiro CLI 2.26.1 em 2026-10-01 |
+| Antigravity CLI (`agy`), uso interativo e `-p` | `iron init --agent=antigravity` e `iron doctor --agent=antigravity` | suportado, verificado com o Antigravity CLI 1.2.14 em 2026-10-01 |
 | Kiro CLI v3 com `--no-interactive` | | **não suportado**: o Kiro não executa hooks nesse modo |
 | Kiro IDE | | **não suportado**: o hook do IDE não recebe o comando |
 
@@ -191,6 +192,12 @@ cria um mínimo, que **substitui o agente padrão do Kiro nessa pasta** (sem o p
 que já existem recebem o hook sem perder o resto. O Kiro não entende "perguntar": quando o Iron Brake
 precisaria perguntar, ele mostra a própria janela (macOS) e, sem janela, bloqueia. Limites em
 [doc/known-issues.md](doc/known-issues.md) (seção 19).
+
+No Antigravity, o `iron init` grava o conjunto `iron-brake` em `.agents/hooks.json` do projeto (o resto do
+arquivo fica). O agente só roda o hook de uma pasta em que você confiou, e **ignora em silêncio um
+`hooks.json` com JSON inválido**: o `iron doctor --agent=antigravity` confere isso. O Iron Brake nunca usa o
+"ask" do Antigravity (com a aprovação automática do agente ligada ele não segura nada): pergunta na própria
+janela e, sem janela, bloqueia. `iron watch --agent=antigravity` confere de fora se o hook está vendo os comandos. Limites na seção 20 do [doc/known-issues.md](doc/known-issues.md).
 
 ## Iron Shield: o que o agente enxerga
 
