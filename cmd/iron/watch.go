@@ -14,6 +14,7 @@ import (
 
 	"github.com/IronDeploy/IronBrake/internal/audit"
 	"github.com/IronDeploy/IronBrake/internal/dialog"
+	"github.com/IronDeploy/IronBrake/internal/hook"
 	"github.com/IronDeploy/IronBrake/internal/rules"
 	"github.com/IronDeploy/IronBrake/internal/setup"
 	"github.com/IronDeploy/IronBrake/internal/watch"
@@ -27,6 +28,8 @@ const watchUsage = `uso: iron watch [opções]
   --since DUR    com --once, o período conferido (padrão 1h; ex.: 30m, 24h)
   --dir PASTA    pasta de transcripts (padrão: ~/.claude/projects/<esta pasta>)
   --all          todas as pastas de ~/.claude/projects
+  --agent NOME   claude (padrão) ou antigravity: de qual agente ler os transcripts
+                 (antigravity: ~/.gemini/antigravity-cli/brain, só os comandos desta pasta; --all: de todas)
   --notify       também avisa por notificação do sistema (macOS)
   --grace DUR    espera depois do resultado antes de acusar (padrão 3s)`
 
@@ -38,13 +41,14 @@ type watchOptions struct {
 	once   bool
 	since  time.Duration
 	dir    string
+	agent  string
 	all    bool
 	notify bool
 	grace  time.Duration
 }
 
 func parseWatchArgs(args []string) (watchOptions, error) {
-	opts := watchOptions{since: time.Hour, grace: watch.DefaultGrace}
+	opts := watchOptions{since: time.Hour, grace: watch.DefaultGrace, agent: hook.Claude.Name()}
 	duration := func(flag, value string) (time.Duration, error) {
 		d, err := time.ParseDuration(value)
 		if err != nil || d <= 0 {
@@ -88,6 +92,11 @@ func parseWatchArgs(args []string) (watchOptions, error) {
 			}
 		case "--dir":
 			opts.dir, err = next()
+		case "--agent":
+			var v string
+			if v, err = next(); err == nil {
+				opts.agent, err = watchAgent(v)
+			}
 		default:
 			err = fmt.Errorf("opção desconhecida %q", args[i])
 		}
@@ -96,6 +105,19 @@ func parseWatchArgs(args []string) (watchOptions, error) {
 		}
 	}
 	return opts, nil
+}
+
+// watchAgent aceita os agentes cujo transcript tem formato verificado.
+func watchAgent(name string) (string, error) {
+	agent, err := hook.Lookup(name)
+	if err != nil {
+		return "", err
+	}
+	switch agent.Name() {
+	case hook.Claude.Name(), hook.Antigravity.Name():
+		return agent.Name(), nil
+	}
+	return "", fmt.Errorf("o iron watch ainda não lê os transcripts do agente %q (só claude e antigravity)", agent.Name())
 }
 
 // watchDeps reúne o que o watch usa do mundo externo, para os testes trocarem.
@@ -147,10 +169,17 @@ func runWatch(args []string, stdout, stderr io.Writer, deps watchDeps) int {
 		return 1
 	}
 	if !opts.all && opts.dir == "" {
-		warnIfHookMissing(deps.cwd, deps.home, stderr)
+		warnIfHookMissing(opts.agent, deps.cwd, deps.home, stderr)
 	}
 
 	src := watch.Source{Classify: rules.Classify, Entries: deps.entries}
+	if opts.agent == hook.Antigravity.Name() {
+		src.Format = &watch.AntigravityFormat
+		if !opts.all {
+			// as conversas de todos os projetos ficam numa pasta só
+			src.Keep = watch.InProject(deps.cwd)
+		}
+	}
 	if opts.once {
 		return watchOnce(opts, dirs, src, deps, stdout, stderr)
 	}
@@ -158,6 +187,17 @@ func runWatch(args []string, stdout, stderr io.Writer, deps watchDeps) int {
 }
 
 func watchDirs(opts watchOptions, deps watchDeps) ([]string, error) {
+	if opts.agent == hook.Antigravity.Name() {
+		dir := opts.dir
+		if dir == "" {
+			dir = watch.BrainDir(deps.home)
+		}
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			return nil, fmt.Errorf("não achei as conversas do Antigravity (%s); use --dir", dir)
+		}
+		return []string{dir}, nil
+	}
+
 	switch {
 	case opts.dir != "":
 		return []string{opts.dir}, nil
@@ -185,7 +225,16 @@ func watchDirs(opts watchOptions, deps watchDeps) ([]string, error) {
 
 // warnIfHookMissing: sem o hook instalado (nem na pasta, nem no usuário), todo
 // comando seria acusado; dizer isso logo evita um relatório confuso.
-func warnIfHookMissing(cwd, home string, stderr io.Writer) {
+func warnIfHookMissing(agent, cwd, home string, stderr io.Writer) {
+	if agent == hook.Antigravity.Name() {
+		if hooks, err := setup.FindAntigravity(cwd); err == nil && len(hooks) > 0 {
+			return
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return // arquivo ilegível: não dá para afirmar nada
+		}
+		fmt.Fprintf(stderr, "iron: aviso: o hook do Iron Brake não está em %s; todo comando desta pasta será acusado. rode \"iron init --agent=antigravity\".\n", setup.AntigravityHooksPath(cwd))
+		return
+	}
 	project := setup.SettingsPath(cwd)
 	for _, path := range []string{project, setup.SettingsPath(home)} {
 		if hooks, err := setup.FindHooks(path); err == nil && len(hooks) > 0 {
@@ -251,7 +300,7 @@ func watchFollow(opts watchOptions, dirs []string, src watch.Source, deps watchD
 		for _, g := range gaps {
 			total++
 			fmt.Fprintln(stdout, gapLine(g))
-			entry := audit.Entry{Session: g.Call.Session, Agent: "claude", Class: g.Class, Decision: "gap", Rule: "watch"}
+			entry := audit.Entry{Session: g.Call.Session, Agent: opts.agent, Class: g.Class, Decision: "gap", Rule: "watch"}
 			if err := deps.record(entry); err != nil {
 				fmt.Fprintln(stderr, "iron: não consegui gravar o log de auditoria")
 			}

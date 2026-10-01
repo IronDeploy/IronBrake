@@ -13,6 +13,7 @@ type Call struct {
 	Session string
 	ID      string
 	Command string
+	Cwd     string    // onde o comando roda, quando o transcript diz (Antigravity)
 	At      time.Time // quando o agente a emitiu
 	DoneAt  time.Time // quando o resultado voltou; zero = ainda sem resultado
 }
@@ -70,9 +71,14 @@ func parseLine(line []byte) (event, bool) {
 	return ev, len(ev.calls) > 0 || len(ev.results) > 0
 }
 
-// ParseTranscript lê um transcript inteiro e devolve as chamadas de shell, com a
-// hora do resultado quando ele já voltou.
-func ParseTranscript(r io.Reader) ([]Call, error) {
+// parser lê uma linha de transcript; cada formato tem o seu.
+type parser func(line []byte) (event, bool)
+
+// ParseTranscript lê um transcript do Claude Code inteiro e devolve as chamadas
+// de shell, com a hora do resultado quando ele já voltou.
+func ParseTranscript(r io.Reader) ([]Call, error) { return parseAll(r, parseLine) }
+
+func parseAll(r io.Reader, parse parser) ([]Call, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return nil, err
@@ -81,7 +87,7 @@ func ParseTranscript(r io.Reader) ([]Call, error) {
 	var calls []Call
 	results := map[string]time.Time{}
 	for _, line := range bytes.Split(data, []byte("\n")) {
-		ev, ok := parseLine(line)
+		ev, ok := parse(line)
 		if !ok {
 			continue
 		}
@@ -101,6 +107,7 @@ const maxReadPerPoll = 8 << 20
 // tail lê só o que foi acrescentado a um arquivo desde a última leitura.
 type tail struct {
 	path    string
+	parse   parser // leitor de linhas do formato do arquivo
 	offset  int64
 	partial []byte // fim de arquivo sem quebra de linha: a linha ainda está sendo escrita
 }

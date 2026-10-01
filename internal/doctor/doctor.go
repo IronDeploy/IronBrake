@@ -121,7 +121,7 @@ func CheckCoverage(c Coverage) Result {
 	}
 	if len(dirs) == 0 {
 		result.OK = true
-		result.Detail = "sem transcripts do Claude Code para esta pasta: nada a conferir"
+		result.Detail = "sem transcripts do agente para esta pasta: nada a conferir"
 		return result
 	}
 
@@ -138,7 +138,7 @@ func CheckCoverage(c Coverage) Result {
 		result.Detail = fmt.Sprintf("%d comando(s) de shell desde %s, todos com decisão do Iron Brake", checked, c.Since.Local().Format("02/01 15:04"))
 	default:
 		result.Detail = fmt.Sprintf("%d de %d comando(s) de shell desde %s rodaram SEM decisão do Iron Brake", len(gaps), checked, c.Since.Local().Format("02/01 15:04"))
-		result.Fix = "o hook não está disparando para esse agente. Se instalou o hook com o agente aberto, reinicie a sessão; senão, confira /hooks no Claude Code. Rode iron watch --once para ver quais."
+		result.Fix = "o hook não está disparando para esse agente. Se instalou o hook com o agente aberto, reinicie a sessão; senão, confira a configuração do agente (no Claude Code, /hooks). Rode iron watch --once (com --agent=antigravity para o Antigravity) para ver quais."
 	}
 	return result
 }
@@ -380,30 +380,45 @@ func checkBinary(command string) Result {
 // checkResponds roda o hook como o agente faria, sem shell, e exige o código 2
 // para um force push. event é o stdin no formato do agente.
 func checkResponds(command string, args []string, event string, timeout time.Duration) Result {
+	return checkRespondsWith(command, args, event, timeout, func(code int, _ string) (bool, string) {
+		return code == 2, "o force push de teste foi bloqueado (código 2)"
+	})
+}
+
+// checkRespondsWith é o checkResponds com a definição de "bloqueou" do agente:
+// blocked recebe o código de saída e o stdout, e devolve se bloqueou e como.
+func checkRespondsWith(command string, args []string, event string, timeout time.Duration, blocked func(code int, stdout string) (bool, string)) Result {
 	result := Result{Name: nameResponds}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	var stdout strings.Builder
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Stdin = strings.NewReader(event)
+	cmd.Stdout = &stdout
 	cmd.WaitDelay = time.Second
 	err := cmd.Run()
 
 	var exitErr *exec.ExitError
-	switch {
+	code := 0
+	if errors.As(err, &exitErr) {
+		code = exitErr.ExitCode()
+	}
+
+	switch ok, how := blocked(code, stdout.String()); {
 	case ctx.Err() != nil:
 		result.Detail = fmt.Sprintf("o hook não respondeu em %s", timeout)
 		result.Fix = "rode " + command + " hook e veja por que trava; o agente deixa passar o comando de um hook que estoura o tempo."
-	case err == nil:
-		result.Detail = "o hook liberou o force push de teste (saiu com código 0)"
-		result.Fix = "recompile o binário (go build) e rode iron init de novo; este hook NÃO está protegendo."
-	case errors.As(err, &exitErr) && exitErr.ExitCode() == 2:
+	case ok:
 		result.OK = true
-		result.Detail = "o force push de teste foi bloqueado (código 2)"
-	case errors.As(err, &exitErr):
-		result.Detail = fmt.Sprintf("o hook saiu com código %d em vez de 2", exitErr.ExitCode())
-		result.Fix = "só o código 2 bloqueia; recompile o binário (go build) e rode iron init de novo."
+		result.Detail = how
+	case err == nil:
+		result.Detail = "o hook liberou o force push de teste (saiu com código 0 sem bloquear)"
+		result.Fix = "recompile o binário (go build) e rode iron init de novo; este hook NÃO está protegendo."
+	case exitErr != nil:
+		result.Detail = fmt.Sprintf("o hook saiu com código %d e não bloqueou como esperado", code)
+		result.Fix = "recompile o binário (go build) e rode iron init de novo."
 	default:
 		result.Detail = "não consegui executar o hook: " + err.Error()
 		result.Fix = "confira as permissões do arquivo e rode iron doctor de novo."

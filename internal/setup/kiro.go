@@ -39,8 +39,11 @@ type KiroResult struct {
 
 // kiroCommand é a linha que o Kiro executa: o caminho vai entre aspas simples
 // porque o command do Kiro é texto (passa por um shell), não exec com args.
-func kiroCommand(exePath string) string {
-	return shellQuote(exePath) + " " + HookSubcommand + " " + kiroHookArg
+func kiroCommand(exePath string) string { return ironCommand(exePath, kiroHookArg) }
+
+// ironCommand monta '<caminho>' hook --agent=NOME.
+func ironCommand(exePath, agentArg string) string {
+	return shellQuote(exePath) + " " + HookSubcommand + " " + agentArg
 }
 
 func shellQuote(s string) string {
@@ -333,8 +336,11 @@ func FindKiro(dir string) (KiroHooks, error) {
 
 // parseKiroCommand desfaz o kiroCommand: '<caminho>' hook --agent=kiro. Só
 // reconhece programas chamados iron, para o doctor nunca executar outro.
-func parseKiroCommand(cmd string) (string, bool) {
-	suffix := " " + HookSubcommand + " " + kiroHookArg
+func parseKiroCommand(cmd string) (string, bool) { return parseIronCommand(cmd, kiroHookArg) }
+
+// parseIronCommand desfaz o ironCommand do agente indicado.
+func parseIronCommand(cmd, agentArg string) (string, bool) {
+	suffix := " " + HookSubcommand + " " + agentArg
 	body, ok := strings.CutSuffix(cmd, suffix)
 	if !ok || len(body) < 2 || body[0] != '\'' || body[len(body)-1] != '\'' {
 		return "", false

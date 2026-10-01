@@ -76,10 +76,16 @@ func (c Capabilities) Budget() Budget {
 // DefaultAgent é o agente de "iron hook" sem --agent.
 const DefaultAgent = "claude"
 
-var agents = []Agent{Claude, Kiro}
+var agents = []Agent{Claude, Kiro, Antigravity}
+
+// agentAliases são nomes alternativos aceitos em --agent.
+var agentAliases = map[string]string{"agy": "antigravity"}
 
 // Lookup acha o agente pelo nome, sem diferenciar maiúsculas.
 func Lookup(name string) (Agent, error) {
+	if real, ok := agentAliases[strings.ToLower(name)]; ok {
+		name = real
+	}
 	for _, a := range agents {
 		if strings.EqualFold(a.Name(), name) {
 			return a, nil

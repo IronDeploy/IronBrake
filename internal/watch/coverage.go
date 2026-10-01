@@ -34,6 +34,20 @@ type Gap struct {
 type Source struct {
 	Classify func(command string) string
 	Entries  func(since time.Time) ([]audit.Entry, error)
+
+	// Format é o formato dos transcripts; nil = Claude Code.
+	Format *Format
+
+	// Keep, se não for nil, descarta as chamadas que não são deste projeto (os
+	// transcripts do Antigravity de todos os projetos ficam numa pasta só).
+	Keep func(Call) bool
+}
+
+func (s Source) format() Format {
+	if s.Format != nil {
+		return *s.Format
+	}
+	return ClaudeFormat
 }
 
 // Tracker guarda as chamadas ainda não conferidas e as decisões já usadas.
@@ -55,6 +69,9 @@ func NewTracker(src Source, grace time.Duration) *Tracker {
 // Add registra chamadas e resultados vistos no transcript.
 func (t *Tracker) Add(ev event) {
 	for _, c := range ev.calls {
+		if t.src.Keep != nil && !t.src.Keep(c) {
+			continue
+		}
 		if _, seen := t.pending[c.ID]; !seen {
 			t.order = append(t.order, c.ID)
 		}

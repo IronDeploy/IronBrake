@@ -168,7 +168,7 @@ func TestWarnIfHookMissing(t *testing.T) {
 				write(home, c.user)
 			}
 			var stderr bytes.Buffer
-			warnIfHookMissing(project, home, &stderr)
+			warnIfHookMissing("claude", project, home, &stderr)
 			if got := stderr.Len() > 0; got != c.wantWarning {
 				t.Errorf("aviso=%v, esperava %v (%q)", got, c.wantWarning, stderr.String())
 			}

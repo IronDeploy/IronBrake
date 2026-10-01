@@ -8,6 +8,7 @@ import (
 // Watcher acompanha os transcripts de uma pasta e confere cada chamada.
 type Watcher struct {
 	dirs    []string
+	format  Format
 	tracker *Tracker
 	tails   map[string]*tail
 	started time.Time
@@ -16,10 +17,10 @@ type Watcher struct {
 // New acompanha o que for escrito a partir de agora: as linhas que já estavam
 // nos arquivos não contam, e arquivos criados depois são lidos desde o começo.
 func New(dirs []string, src Source, grace time.Duration, now time.Time) *Watcher {
-	w := &Watcher{dirs: dirs, tracker: NewTracker(src, grace), tails: map[string]*tail{}, started: now}
+	w := &Watcher{dirs: dirs, format: src.format(), tracker: NewTracker(src, grace), tails: map[string]*tail{}, started: now}
 	for _, dir := range dirs {
-		for _, path := range transcripts(dir) {
-			t := &tail{path: path}
+		for _, path := range w.format.Files(dir) {
+			t := &tail{path: path, parse: w.format.NewParser(path)}
 			t.atEnd()
 			w.tails[path] = t
 		}
@@ -30,10 +31,10 @@ func New(dirs []string, src Source, grace time.Duration, now time.Time) *Watcher
 // Poll lê o que os transcripts ganharam e devolve as lacunas já confirmadas.
 func (w *Watcher) Poll(now time.Time) ([]Gap, error) {
 	for _, dir := range w.dirs {
-		for _, path := range transcripts(dir) {
+		for _, path := range w.format.Files(dir) {
 			t, known := w.tails[path]
 			if !known {
-				t = &tail{path: path}
+				t = &tail{path: path, parse: w.format.NewParser(path)}
 				w.tails[path] = t
 			}
 			lines, err := t.lines()
@@ -45,7 +46,7 @@ func (w *Watcher) Poll(now time.Time) ([]Gap, error) {
 				return nil, err
 			}
 			for _, line := range lines {
-				if ev, ok := parseLine(line); ok {
+				if ev, ok := t.parse(line); ok {
 					w.tracker.Add(ev)
 				}
 			}
@@ -63,8 +64,9 @@ func (w *Watcher) Stats() (checked, covered int) {
 // partir de since, com resultado. Serve para o relatório do "iron watch --once".
 func Scan(dirs []string, src Source, since time.Time) (gaps []Gap, checked, covered int, err error) {
 	t := NewTracker(src, 0)
+	format := src.format()
 	for _, dir := range dirs {
-		for _, path := range transcripts(dir) {
+		for _, path := range format.Files(dir) {
 			if info, statErr := os.Stat(path); statErr != nil || info.ModTime().Before(since) {
 				continue
 			}
@@ -72,7 +74,7 @@ func Scan(dirs []string, src Source, since time.Time) (gaps []Gap, checked, cove
 			if openErr != nil {
 				return nil, 0, 0, openErr
 			}
-			calls, parseErr := ParseTranscript(f)
+			calls, parseErr := parseAll(f, format.NewParser(path))
 			f.Close()
 			if parseErr != nil {
 				return nil, 0, 0, parseErr

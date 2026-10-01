@@ -44,9 +44,10 @@ const usage = `uso: iron <subcomando>
   hook          roda como hook de pré-execução do agente (lê o evento pelo stdin; --agent=claude)
   init          instala o hook em .claude/settings.json da pasta atual e a etiqueta do agente na AWS
   init --agent=kiro  instala o hook do Kiro CLI (.kiro/agents e .kiro/hooks) na pasta atual
+  init --agent=antigravity  instala o hook do Antigravity CLI (.agents/hooks.json) na pasta atual (apelido: agy)
   init --no-aws-tag  instala só o hook, sem gravar AWS_SDK_UA_APP_ID no env do agente
   init --harden grava também regras deny de leitura das credenciais (Iron Shield)
-  doctor        verifica se o hook desta pasta está mesmo protegendo (--agent=kiro para o Kiro CLI)
+  doctor        verifica se o hook desta pasta está mesmo protegendo (--agent=kiro ou --agent=antigravity)
   scan          raio-X das credenciais ao alcance do agente (Iron Shield, só leitura)
   scan --manage igual, mas interativo: setas navegam, enter oculta/mostra, esc/q sai
   shield status mostra quais credenciais estão travadas e quais não estão
@@ -407,8 +408,11 @@ func initHere(args []string, stdout, stderr io.Writer) int {
 	// os.Executable() não normaliza: "../bin/iron" vira ".../a/../bin/iron", e o
 	// hook ficaria gravado com esse caminho.
 	exePath = filepath.Clean(exePath)
-	if agent.Name() == hook.Kiro.Name() {
+	switch agent.Name() {
+	case hook.Kiro.Name():
 		return runInitKiro(dir, exePath, opts, stdout, stderr)
+	case hook.Antigravity.Name():
+		return runInitAntigravity(dir, exePath, opts, stdout, stderr)
 	}
 	return runInit(dir, exePath, opts, stdout, stderr)
 }
@@ -424,6 +428,37 @@ func initAgent(args []string) (hook.Agent, error) {
 		}
 	}
 	return hook.Lookup(name)
+}
+
+// runInitAntigravity instala o hook do Antigravity CLI (.agents/hooks.json). O
+// shield é do Claude, e a etiqueta da AWS não foi verificada no ambiente dele.
+func runInitAntigravity(dir, exePath string, opts initOptions, stdout, stderr io.Writer) int {
+	if opts.harden {
+		fmt.Fprintln(stderr, "iron: --harden só vale para o Claude Code (usa regras de permissão dele)")
+		return 2
+	}
+	state, err := setup.InstallAntigravity(dir, exePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "iron: %v\n", err)
+		return 1
+	}
+	path := setup.AntigravityHooksPath(dir)
+	switch state {
+	case setup.Installed:
+		fmt.Fprintf(stdout, "iron: hook do Antigravity instalado em %s\n", path)
+	case setup.Updated:
+		fmt.Fprintf(stdout, "iron: hook do Antigravity atualizado em %s (caminho, matcher ou prazo estavam diferentes)\n", path)
+	default:
+		fmt.Fprintf(stdout, "iron: o hook do Antigravity já estava em %s\n", path)
+	}
+	fmt.Fprintln(stdout, "iron: aviso: o Antigravity só roda o hook de uma pasta em que você confiou (aviso na primeira vez que abrir o agy aqui).")
+	if opts.awsTag {
+		fmt.Fprintf(stdout, "iron: para o CloudTrail distinguir este agente, exporte %s=%s no terminal antes de abrir o agy (o Antigravity não tem onde gravar isso; o agy repassa o ambiente aos comandos).\n", awsTagVar, hook.Antigravity.Capabilities().AppID)
+	}
+	if !setup.IsIronBinaryName(exePath) {
+		fmt.Fprintf(stderr, "iron: aviso: o programa se chama %q; o hook funciona, mas o iron doctor só o reconhece se o arquivo se chamar iron (ou iron.exe).\n", filepath.Base(exePath))
+	}
+	return 0
 }
 
 // runInitKiro instala o hook do Kiro CLI nos dois formatos (v2 e v3). O shield
@@ -710,8 +745,11 @@ func doctorHere(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "iron: %v\n", err)
 		return 1
 	}
-	if agent.Name() == hook.Kiro.Name() {
+	switch agent.Name() {
+	case hook.Kiro.Name():
 		return runDoctorKiro(dir, stdout)
+	case hook.Antigravity.Name():
+		return runDoctorAntigravity(dir, stdout)
 	}
 	if _, err := os.Stat(setup.SettingsPath(dir)); err != nil {
 		if _, kiroErr := os.Stat(filepath.Join(dir, ".kiro")); kiroErr == nil {
@@ -719,6 +757,34 @@ func doctorHere(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	return runDoctor(dir, stdout)
+}
+
+func runDoctorAntigravity(dir string, stdout io.Writer) int {
+	extra := doctor.Extra{
+		Log:        audit.Log{Path: audit.DefaultPath()},
+		ConfigPath: toolpath.ConfigPath(),
+		ProjectDir: dir,
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		since := time.Now().Add(-coverageWindow)
+		if info, err := os.Stat(setup.AntigravityHooksPath(dir)); err == nil && info.ModTime().After(since) {
+			since = info.ModTime() // o hook não existia antes disto
+		}
+		extra.Coverage = &doctor.Coverage{
+			Dirs: []string{watch.BrainDir(home)},
+			Source: watch.Source{
+				Classify: rules.Classify, Entries: extra.Log.Entries,
+				Format: &watch.AntigravityFormat, Keep: watch.InProject(dir),
+			},
+			Since: since,
+		}
+	}
+	results := doctor.RunAntigravity(dir, version, doctorTimeout, extra)
+	doctor.Print(stdout, results)
+	if !doctor.AllOK(results) {
+		return 1
+	}
+	return 0
 }
 
 func runDoctorKiro(dir string, stdout io.Writer) int {
