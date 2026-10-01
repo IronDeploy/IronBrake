@@ -309,6 +309,11 @@ func checkSettings(settingsPath string) (Result, []setup.Hook) {
 		result.Detail = err.Error()
 		result.Fix = "corrija o arquivo (JSON estrito: sem comentários nem vírgula sobrando) e rode iron doctor de novo."
 	case len(hooks) == 0:
+		if renamed, _ := setup.FindRenamedHooks(settingsPath); len(renamed) > 0 {
+			result.Detail = fmt.Sprintf("há um hook com o argumento \"hook\" apontando para %s, mas o doctor só reconhece programas chamados iron (ou iron.exe)", renamed[0])
+			result.Fix = "renomeie o binário para iron (o install.sh já instala assim) e rode iron init de novo na raiz do projeto; remova o hook antigo do settings.json."
+			break
+		}
 		result.Detail = "o arquivo existe, mas não tem o hook do Iron Brake"
 		result.Fix = "rode iron init para adicionar o hook sem apagar o resto do arquivo."
 	default:

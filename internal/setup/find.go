@@ -4,12 +4,20 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
-// ironBinaryName: só handlers que apontam para um binário com esse nome contam,
-// para o doctor nunca executar um programa listado por um settings.json de
-// terceiros.
+// ironBinaryName: só handlers que apontam para um binário com esse nome (com
+// ou sem ".exe") contam, para o doctor nunca executar um programa listado por
+// um settings.json de terceiros.
 const ironBinaryName = "iron"
+
+// IsIronBinaryName diz se o nome do arquivo é o que o doctor reconhece: "iron"
+// ou "iron.exe", sem diferenciar maiúsculas (o Windows não diferencia).
+func IsIronBinaryName(path string) bool {
+	name := strings.ToLower(filepath.Base(path))
+	return strings.TrimSuffix(name, ".exe") == ironBinaryName
+}
 
 func SettingsPath(dir string) string {
 	return filepath.Join(dir, ".claude", "settings.json")
@@ -49,6 +57,32 @@ func FindHooks(settingsPath string) ([]Hook, error) {
 
 func isIronHandler(h handler) bool {
 	return h.Type == "command" &&
-		filepath.Base(h.Command) == ironBinaryName &&
+		IsIronBinaryName(h.Command) &&
 		slices.Equal(h.Args, []string{HookSubcommand})
+}
+
+// FindRenamedHooks devolve os comandos que parecem o hook do Iron Brake (o
+// argumento "hook" no matcher Bash) mas apontam para um programa que não se
+// chama iron. O doctor não os reconhece nem os executa; só os lista, para dizer
+// à pessoa por que o hook "não existe" depois de um "iron init" com o binário
+// renomeado.
+func FindRenamedHooks(settingsPath string) ([]string, error) {
+	doc, err := load(settingsPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var commands []string
+	for _, raw := range doc.groups {
+		var group matcherGroup
+		if json.Unmarshal(raw, &group) != nil || group.Matcher != ironMatcher {
+			continue
+		}
+		for _, h := range group.Hooks {
+			if h.Type == "command" && slices.Equal(h.Args, []string{HookSubcommand}) && !IsIronBinaryName(h.Command) {
+				commands = append(commands, h.Command)
+			}
+		}
+	}
+	return commands, nil
 }

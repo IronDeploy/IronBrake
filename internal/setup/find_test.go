@@ -104,3 +104,54 @@ func TestFindHooksRecognizesWhatInitInstalls(t *testing.T) {
 		t.Errorf("esperava %v, obtive %v", want, got)
 	}
 }
+
+func TestIsIronBinaryName(t *testing.T) {
+	for path, want := range map[string]bool{
+		"/usr/local/bin/iron":       true,
+		"iron":                      true,
+		"/x/iron.exe":               true,
+		"/x/IRON.EXE":               true,
+		"/x/Iron":                   true,
+		"/x/iron_linux_amd64":       false,
+		"/x/iron_windows_amd64.exe": false,
+		"/x/iron-novo":              false,
+		"/x/siron":                  false,
+		"/x/iron.sh":                false,
+		"":                          false,
+	} {
+		if got := IsIronBinaryName(path); got != want {
+			t.Errorf("IsIronBinaryName(%q) = %v, esperava %v", path, got, want)
+		}
+	}
+}
+
+func TestFindHooksAcceptsExe(t *testing.T) {
+	path := newSettingsPath(t, `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/x/iron.exe","args":["hook"]}]}]}}`)
+	hooks, err := FindHooks(path)
+	if err != nil || len(hooks) != 1 {
+		t.Errorf("iron.exe deve ser reconhecido: %v %v", hooks, err)
+	}
+}
+
+func TestFindRenamedHooks(t *testing.T) {
+	path := newSettingsPath(t, `{"hooks":{"PreToolUse":[
+		{"matcher":"Bash","hooks":[{"type":"command","command":"/dl/iron_linux_amd64","args":["hook"]}]},
+		{"matcher":"Bash","hooks":[{"type":"command","command":"/x/iron","args":["hook"]}]},
+		{"matcher":"Bash","hooks":[{"type":"command","command":"/x/outro","args":["lint"]}]},
+		{"matcher":"Read","hooks":[{"type":"command","command":"/x/renomeado","args":["hook"]}]}
+	]}}`)
+
+	got, err := FindRenamedHooks(path)
+	if err != nil || len(got) != 1 || got[0] != "/dl/iron_linux_amd64" {
+		t.Errorf("só o hook de nome diferente, no matcher Bash e com o argumento hook: %v %v", got, err)
+	}
+
+	// O renomeado não é reconhecido como hook do Iron Brake (o doctor não o executa).
+	if hooks, _ := FindHooks(path); len(hooks) != 1 || hooks[0].Command != "/x/iron" {
+		t.Errorf("FindHooks só devolve o que se chama iron: %v", hooks)
+	}
+
+	if _, err := FindRenamedHooks(filepath.Join(t.TempDir(), "nao-existe.json")); err == nil {
+		t.Error("sem arquivo deve dar erro")
+	}
+}

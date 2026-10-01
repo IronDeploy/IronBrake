@@ -546,3 +546,27 @@ func TestRunAllSkipsOptionalChecksByDefault(t *testing.T) {
 		t.Errorf("sem Coverage e AWSTag, são as 7 de sempre: %d", len(results))
 	}
 }
+
+func TestCheckSettingsExplainsARenamedBinary(t *testing.T) {
+	dir := t.TempDir()
+	renamed := filepath.Join(dir, "iron_linux_amd64")
+	path := writeSettings(t, dir, settingsWith(t, "Bash", renamed))
+
+	got, hooks := checkSettings(path)
+
+	if got.OK || len(hooks) != 0 {
+		t.Fatalf("o hook renomeado não é reconhecido: %+v", got)
+	}
+	if !strings.Contains(got.Detail, "iron_linux_amd64") || !strings.Contains(got.Detail, "só reconhece programas chamados iron") {
+		t.Errorf("deveria dizer o motivo real: %q", got.Detail)
+	}
+	if !strings.Contains(got.Fix, "renomeie o binário para iron") || strings.Contains(got.Fix, "rode iron init para adicionar o hook") {
+		t.Errorf("a correção não pode mandar só rodar o init de novo (ciclo sem saída): %q", got.Fix)
+	}
+
+	// Sem nenhum hook parecido, a mensagem de sempre.
+	empty := writeSettings(t, t.TempDir(), `{"model":"x"}`)
+	if got, _ := checkSettings(empty); !strings.Contains(got.Detail, "não tem o hook do Iron Brake") {
+		t.Errorf("mensagem de sempre: %q", got.Detail)
+	}
+}

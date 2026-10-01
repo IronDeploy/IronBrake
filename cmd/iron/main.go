@@ -425,6 +425,9 @@ func runInit(dir, exePath string, opts initOptions, stdout, stderr io.Writer) in
 	} else {
 		fmt.Fprintf(stdout, "iron: o hook já estava instalado em %s\n", settingsPath)
 	}
+	if !setup.IsIronBinaryName(exePath) {
+		fmt.Fprintf(stderr, "iron: aviso: o programa se chama %q; o hook funciona, mas o iron doctor só o reconhece se o arquivo se chamar iron (ou iron.exe). Renomeie e rode iron init de novo.\n", filepath.Base(exePath))
+	}
 
 	if opts.awsTag {
 		reportAWSTag(settingsPath, stdout, stderr)

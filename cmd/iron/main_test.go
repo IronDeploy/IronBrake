@@ -1257,3 +1257,25 @@ func TestAWSAlertsPrintsTheTemplate(t *testing.T) {
 		t.Errorf("saída: %.80q", stdout.String())
 	}
 }
+
+func TestRunInitWarnsWhenTheBinaryIsRenamed(t *testing.T) {
+	for exe, wantWarning := range map[string]bool{
+		"/opt/iron":                   false,
+		"/opt/iron.exe":               false,
+		"/opt/iron_linux_amd64":       true,
+		"/opt/iron_darwin_arm64":      true,
+		`/opt/iron_windows_amd64.exe`: true,
+	} {
+		dir := t.TempDir()
+		var stdout, stderr bytes.Buffer
+
+		code := runInit(dir, exe, initOptions{}, &stdout, &stderr)
+
+		if code != 0 {
+			t.Fatalf("%s: código %d", exe, code)
+		}
+		if warned := strings.Contains(stderr.String(), "só o reconhece se o arquivo se chamar iron"); warned != wantWarning {
+			t.Errorf("%s: avisou=%v, esperava %v (%q)", exe, warned, wantWarning, stderr.String())
+		}
+	}
+}
