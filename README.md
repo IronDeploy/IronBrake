@@ -46,16 +46,20 @@ iron doctor    # confere se está protegendo
 ## Conferir com `iron doctor`
 
 ```
-OK     1/7  settings.json contém o hook do Iron Brake
-OK     2/7  o binário do hook existe e é executável
-OK     3/7  o hook bloqueia um force push de teste
+OK     1/9  settings.json contém o hook do Iron Brake
+OK     2/9  o binário do hook existe e é executável
+OK     3/9  o hook bloqueia um force push de teste
              o force push de teste foi bloqueado (código 2)
-OK     4/7  o timeout do hook dá tempo ao Iron Brake
-OK     5/7  os programas que o Iron Brake executa (terraform, tofu, terragrunt) são confiáveis
+OK     4/9  o timeout do hook dá tempo ao Iron Brake
+OK     5/9  os programas que o Iron Brake executa (terraform, tofu, terragrunt) são confiáveis
              terraform: /opt/homebrew/bin/terraform (PATH)
-OK     6/7  o log de auditoria grava e a corrente está íntegra
+OK     6/9  o log de auditoria grava e a corrente está íntegra
              /Users/voce/.iron/audit.log: 42 linha(s) em 1 arquivo(s), 7.8 KB
-OK     7/7  versão
+OK     7/9  o hook está vendo os comandos que o agente executa (iron watch)
+             3 comando(s) de shell desde 01/10 09:12, todos com decisão do Iron Brake
+OK     8/9  etiqueta do agente na AWS (opcional)
+             AWS_SDK_UA_APP_ID=iron-claude: o CloudTrail mostra app/iron-claude nas chamadas do agente
+OK     9/9  versão
 
 Tudo certo: o hook está instalado, bloqueou o force push de teste e o log de auditoria está gravando.
 ```
@@ -68,7 +72,37 @@ dentro do projeto ou puder ser alterado por qualquer usuário (um programa falso
 mostraria ao Iron Brake um plano inventado); para fixar o programa, veja
 `~/.iron/config.yaml` abaixo. O teste 6 falha se o log não puder ser gravado, se
 a última gravação do hook falhou (o aviso no stderr do hook quase nunca chega
-até você) ou se a corrente de hashes estiver quebrada.
+até você) ou se a corrente de hashes estiver quebrada. O teste 7 roda o mesmo
+cruzamento do `iron watch --once` sobre as sessões do Claude Code desde que o hook foi
+instalado: **falha** se algum comando de shell rodou sem decisão (o hook não está
+disparando; se você instalou com o agente aberto, reinicie a sessão). O 8 só informa se a
+etiqueta do agente na AWS está gravada.
+
+## Conferir de fora com `iron watch`
+
+O hook decide antes do comando, mas não sabe se **deixou de rodar** (agente que o
+ignora, configuração errada, ou um modo do agente em que ele não carrega). O
+`iron watch` lê o transcript do Claude Code e o log de auditoria e avisa quando um
+comando rodou **sem nenhuma decisão** do Iron Brake:
+
+```bash
+iron watch             # acompanha esta pasta e avisa na hora (--notify para notificação)
+iron watch --once      # confere a última hora e sai com código 1 se houver lacuna
+```
+
+Só observa (não bloqueia) e, por ora, só lê o Claude Code. Detalhes e limites em
+[doc/watch.md](doc/watch.md).
+
+## Portão de credenciais da AWS
+
+Para o que o hook não enxerga (um script, um SDK, um agente que não entrega o comando ao
+hook), o `iron aws-creds` é a ponta do `credential_process` do `~/.aws/config`: humano passa
+direto; **agente** em produção só recebe credenciais depois de você clicar em "Executar", e
+cada pedido de agente fica no log. Também há uma regra do hook contra o agente extrair a
+credencial real (`aws configure export-credentials`). O `iron init` ainda etiqueta o agente
+(`AWS_SDK_UA_APP_ID`) para o CloudTrail mostrar `app/iron-claude` nas chamadas dele, e o
+`iron aws-alerts` imprime um modelo CloudFormation que avisa quando um agente chama uma API
+destrutiva. Configuração, limites e o que foi verificado em [doc/aws.md](doc/aws.md).
 
 ## O que ele bloqueia
 

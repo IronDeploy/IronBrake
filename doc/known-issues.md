@@ -26,7 +26,7 @@ O que **ainda** sai com código 0:
 | `git push $F` com `F=--force` definida em **outra** chamada do shell | o valor só existe quando o shell roda. Variável definida na mesma linha (`F=--force; git push $F`, `export`) é resolvida. Um `git push` com variável ou saída de comando que a linha não define (`$F`, `$OPTS`, `"$(echo --force)"`) é **ask**, salvo variável com nome de branch/remoto/tag (`$BRANCH`, `$REMOTE`) ou `$(git branch --show-current)`. Um comando cujo programa é variável (`$RM -rf x`) também é ask. O que escapa: uma variável com nome de branch que guarda `--force` de propósito |
 | `alias p="git push --force"; p` | alias e funções do shell |
 | `git -c remote.origin.push=+refs/heads/main push` | o force vem de uma configuração, não do comando |
-| script que monta o comando em variável, `make` com receita gerada por variável (`$(CMD)`), script fora do limite (3 níveis) ou maior que 4 MB | o conteúdo de `./x.sh`, `bash x.sh`, `source x.sh`, `python3 x.py`, `node x.js`, `make ALVO` (o Makefile e as dependências do alvo) **é lido** e julgado pelas mesmas regras; variável dentro do script só é vista em um caso: `rm -rf` numa variável sozinha (`$1`, `$DIR/*`) que o script não define e não protege com `set -u` ou `${VAR:?}` é ask |
+| script que monta o comando em variável, `make` com receita gerada por variável (`$(CMD)`), script além do limite (só 2 scripts encadeados são lidos: o que o comando chama e o que esse chama; o terceiro da cadeia não é aberto) ou maior que 4 MB | o conteúdo de `./x.sh`, `bash x.sh`, `source x.sh`, `python3 x.py`, `node x.js`, `make ALVO` (o Makefile e as dependências do alvo) **é lido** e julgado pelas mesmas regras; variável dentro do script só é vista em um caso: `rm -rf` numa variável sozinha (`$1`, `$DIR/*`) que o script não define e não protege com `set -u` ou `${VAR:?}` é ask |
 | `os.system(cmd)` com `cmd` montado em variável | o código na linha (`python3 -c`, `node -e`...) e em arquivo (`python3 x.py`) é lido: os textos passados a `os.system`, `subprocess`, `execSync`... são julgados como comandos, mas variável não |
 | `ssh prod-host "terraform destroy"` | o comando roda em outra máquina (não é analisado) |
 
@@ -48,7 +48,12 @@ git (`branch -D`, `tag -d`, `reflog expire`, `gc --prune=now`, `filter-branch`,
 deny), kubectl (`delete pvc/pv/crd`, `delete -A`/`--all-namespaces`, `scale --replicas=0`,
 `replace --force`), helm
 (`uninstall`, `rollback`), nuvem em massa (`s3 rm --recursive`, `s3 rb --force`,
-`gcloud/gsutil storage rm`, `az ... delete-*`/`purge`), SQL (`DROP SCHEMA`, `DELETE ... WHERE 1=1`, `WHERE TRUE`, `WHERE id=1 OR 1=1` e outros
+`gcloud/gsutil storage rm`, `az ... delete-*`/`purge`), IaC da AWS e vizinhos
+(`cdk destroy`, `cdk deploy --require-approval never`, `sam delete`, `eksctl delete`,
+`pulumi destroy`/`up --yes`/`stack rm --force`/`state delete`, `serverless remove`,
+`cdktf destroy`; também via `npx`/`pnpx`/`bunx`/`pnpm dlx`/`yarn dlx`/`npm exec` e pelo nome do
+pacote, como `aws-cdk@2`; só verificado com o binário e eventos
+montados à mão, **não** com as ferramentas de verdade), SQL (`DROP SCHEMA`, `DELETE ... WHERE 1=1`, `WHERE TRUE`, `WHERE id=1 OR 1=1` e outros
 `WHERE` sempre verdadeiros).
 
 Também passou a **ler o arquivo apontado** pelo comando: `kubectl delete -f x.yaml`
@@ -120,12 +125,16 @@ linha não passar de carona — e aí o Claude Code ainda pode perguntar.
 
 ## 7. Riscos residuais da janela nativa
 
-- **Timeout configurado abaixo de ~530 s:** se alguém definir `"timeout"`
+- **Timeout configurado abaixo de 570 s:** se alguém definir `"timeout"`
   menor no hook do `settings.json`, o Claude Code pode matar o hook enquanto a
   janela espera — e hook que estoura o tempo **não bloqueia**: o comando
   passa. `iron init` não define timeout (vale o padrão de 600 s). O `iron
-  doctor` ainda não verifica isso.
-- **Janela atrás de outras:** não confirmado se ela sempre vem para a frente.
+  doctor` confere isso (verificação 4) e falha se o valor for menor.
+- **Janela atrás de outras (verificado em 2026-10-01, macOS 26, 3 de 3
+  tentativas):** o diálogo do `osascript` abre na camada 8 (painel modal),
+  acima de todas as janelas normais, mesmo com o VS Code em foco. Colocar
+  `activate` no script **piora**: o diálogo nem apareceu em 1,5 s. Não testado:
+  app em tela cheia (outro Space) e vários monitores.
 - **Agente com controle do computador** (computer use, permissão de
   Acessibilidade) poderia, em tese, clicar em Executar.
 
@@ -215,7 +224,7 @@ travamento usa 1 s. Depois disso, 5 rodadas completas sem falha.
   servidor que recebe periodicamente o hash da última linha).
 - **Falha ao gravar (corrigido):** o aviso continua indo para o stderr, que o
   Claude Code só mostra no deny, mas agora o hook também grava um marcador
-  (`audit.log.error`, com hora e motivo) e o `iron doctor` (verificação 5)
+  (`audit.log.error`, com hora e motivo) e o `iron doctor` (verificação 6)
   falha enquanto a última gravação tiver falhado, ou se o log não puder ser
   gravado, ou se a corrente estiver quebrada. Limite: se a própria pasta
   `~/.iron` não aceita gravação, o marcador também não entra; aí quem pega é a
@@ -265,13 +274,15 @@ Decisões tomadas depois da revisão:
 | **Risco:** um `terraform` falso num diretório do `PATH` muda o resultado do `terraform show` (o Iron Brake leria um plano inventado) | **mitigado:** o caminho absoluto vai em `tools.terraform` (`tofu`, `terragrunt`) no `~/.iron/config.yaml` e o Iron Brake executa exatamente esse. Sem configuração, ele recusa o programa do `PATH` que estiver **dentro do projeto** ou que **qualquer usuário possa alterar** (arquivo ou pasta gravável por todos). O `iron doctor` (verificação 5) mostra o que será usado. Fica de fora: um falso num diretório do `PATH` só seu, que o agente escreve com o seu usuário |
 | O caminho do terraform não pode ficar no `.iron/policy.yaml` | de propósito: o hook executa o programa indicado, e o `policy.yaml` vem do repositório (ou de um agente que o edita); um projeto clonado rodaria código na sua máquina. Por isso a configuração é do usuário, em `~/.iron/config.yaml` |
 | Chaves de `for_each` vão no motivo enviado ao Claude e poderiam carregar texto de prompt injection | **corrigido:** o `tfplan.Summarize` saneia os endereços (chave com caractere fora de `A-Z a-z 0-9 _ . : / @ + -` ou com mais de 40 caracteres vira `["…"]`; caracteres de controle viram `?`; até 200 caracteres). Vale para o cartão, a janela e o log |
-| `timeout` do hook menor que o prazo do Iron Brake anula o deny por tempo | **corrigido:** o `iron doctor` confere (verificação 4/5): ausente (padrão 600 s) ou pelo menos 570 s |
+| `timeout` do hook menor que o prazo do Iron Brake anula o deny por tempo | **corrigido:** o `iron doctor` confere (verificação 4): ausente (padrão 600 s) ou pelo menos 570 s |
 
 ## 13. Limites da distribuição
 
 - **Windows compila, mas não foi testado**; o `install.sh` não roda no
-  Windows (instalação manual pelo `.exe`). Nomes como `terraform.exe` na
-  linha de comando não são reconhecidos pelas regras.
+  Windows (instalação manual pelo `.exe`). O sufixo `.exe` no nome do programa
+  é ignorado pelas regras (verificado: `Terraform.exe destroy` e
+  `kubectl.exe delete namespace` são julgados como no Linux), mas caminhos do
+  Windows (`C:\...`) e `cmd /c` não foram testados.
 - **O `SHA256SUMS` vem da mesma release que o binário:** pega download
   corrompido, não release adulterada. A conferência contra adulteração é o
   atestado de proveniência (`gh attestation verify`, ou
@@ -326,3 +337,37 @@ trabalho que o plano original prevê e ainda não começou.
   que evitariam dano, times que pedem política central/Slack).
 - Decisão registrada (seguir para o plano de controle, pivotar ou parar) só
   depois disso — não antes.
+
+## 16. Limites do iron watch
+
+Detalhes em [watch.md](watch.md). Em resumo: só lê os transcripts do Claude Code;
+o transcript é escrito pelo agente (não pega quem burla de propósito); só observa
+(o comando já rodou quando o aviso chega); só chamadas de shell, sem subagentes;
+confere por sessão, classe e hora (não pelo comando); decisão sem `session_id`
+vale para qualquer sessão; precisa estar rodando para acompanhar ao vivo.
+**Verificado em 2026-10-01** contra o transcript real, sem hook ativo; o caso
+"com decisão" só foi exercitado em testes automatizados.
+
+## 17. Limites do portão de credenciais da AWS
+
+Detalhes em [aws.md](aws.md). Em resumo: o agente roda com o seu usuário e pode ler as
+credenciais reais por outro caminho ou forjar a liberação (o arquivo é do seu usuário); processo
+desligado do pai parece humano, a não ser com `--require-tty` (que não serve para CI); a
+identificação é por nome de programa, de script ou de pasta de pacote (`claude`, `kiro-cli`, `gemini`, `codex`,
+`cursor-agent`); sem `--label` no modo auto, o pedido vale como produção; decide
+por pedido de credencial, não por comando; só macOS e Linux (no Windows recusa funcionar). **Verificado
+em 2026-10-01** só com o AWS CLI e credenciais falsas; terraform, cdk, boto3, outros agentes, SSO e
+Linux não foram testados. Custa ~30 ms por pedido.
+
+## 18. Limites da etiqueta do agente e do alerta no CloudTrail
+
+Detalhes em [aws.md](aws.md). A etiqueta (`AWS_SDK_UA_APP_ID=iron-claude` no `env` do `settings.json`)
+é uma declaração do ambiente do agente: ele pode zerá-la, e só vale com a pasta confiada. Verificada só
+com o AWS CLI v2 e o Claude Code; terraform, CDK, boto3 e os outros agentes não foram testados. O modelo
+CloudFormation do alerta (`iron aws-alerts`) foi validado com `cfn-lint`, **não implantado**; exige um
+trail do CloudTrail com logging ativo, uma pilha por região, e só pega eventos de escrita.
+
+**Corrigido nesta rodada (verificado):** o `iron init` chamado por caminho relativo (`../bin/iron`)
+gravava o hook com `..` no caminho e, numa segunda execução, instalava um **segundo** hook em vez de
+reconhecer o primeiro (cada comando passava duas vezes pelo Iron Brake).
+
