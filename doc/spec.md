@@ -227,3 +227,32 @@ A lista só aparece quando há recursos apagados ou substituídos.
 
 ## Pendências já decididas
 
+Decididas em 2026-10-01; **não entram na v0.3.0** (a decisão final de cada uma é do dono do projeto).
+
+### Cobertura de scripts configurável no `policy.yaml`
+
+Hoje o Iron Brake lê o conteúdo de `./x.sh`, `bash x.sh`, `python3 x.py`, `make ALVO` e julga pelas mesmas regras,
+mas só segue **2 scripts encadeados** (o que o comando chama e o que esse chama; o terceiro da cadeia não é aberto).
+O limite é uma constante no código (`maxScriptDepth = 2`, `internal/rules/scripts.go`). A decisão é dar ao usuário
+a possibilidade de **configurar esse nível no `.iron/policy.yaml`**, mantendo 2 como padrão.
+
+Pontos a decidir ao implementar (a decisão é do dono):
+
+- nome da chave (por exemplo `script_depth`) e o **teto** (cada nível lê mais arquivos, até 4 MB cada, e custa tempo no hook);
+- o princípio da seção "Produção e o `.iron/policy.yaml`" continua valendo: o arquivo **só soma**. Então o valor só pode
+  **aumentar** a cobertura: abaixo do padrão (2), acima do teto ou que não é número é erro do arquivo, e arquivo com erro faz
+  **tudo valer como produção** (como no `audit_log`). Sem isso, um projeto de terceiros (ou um agente que edita o arquivo)
+  reduziria a cobertura;
+- o motivo do ask/deny deve dizer quando um script não foi aberto por causa do limite, para quem quiser subir o nível;
+- atualizar `doc/known-issues.md` (seção 1, linha de scripts) e o teste de profundidade.
+
+### `iron doctor --live` (adiado)
+
+Ideia: o doctor rodar o agente de verdade, em modo headless, num repositório temporário, pedindo um comando que **deve** ser
+bloqueado, e conferir o resultado. É a única forma de pegar o caso "o hook está instalado mas não dispara" antes de um comando
+real passar (por exemplo o Kiro CLI v3 em modo não interativo, onde nenhum hook roda). O `iron watch` e a verificação de cobertura do
+`iron doctor` só pegam isso **depois** que um comando rodou.
+
+Custos e cuidados que precisam de decisão: gasta tokens da conta do usuário e exige login; precisa de confirmação explícita
+(opt-in); cada agente tem uma forma diferente de rodar em modo headless; não deve rodar em CI sem credencial.
+**Fora da v0.3.0; a decisão de fazer ou não fica para depois.**

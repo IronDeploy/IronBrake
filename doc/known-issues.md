@@ -371,3 +371,32 @@ trail do CloudTrail com logging ativo, uma pilha por região, e só pega eventos
 gravava o hook com `..` no caminho e, numa segunda execução, instalava um **segundo** hook em vez de
 reconhecer o primeiro (cada comando passava duas vezes pelo Iron Brake).
 
+## 19. Limites do Kiro CLI
+
+Verificado com o Kiro CLI **2.26.1** (macOS), em 2026-10-01, com o agente real e o `iron` real: bloqueio de
+`git push --force` e liberação de comando seguro no v2 (interativo e não interativo) e no v3 interativo;
+`ask` resolvido pela janela do Iron Brake (Executar → roda, Cancelar → bloqueia); prazo de 600 s
+respeitado; `agent: kiro` no log. Não verificado: Linux, Windows, outras versões do Kiro.
+
+- **v3 com `--no-interactive` não executa hooks** (o comando passa sem o Iron Brake, sem erro). Reproduzido
+  aqui para o `preToolUse`; é a issue [kirodotdev/Kiro#11281](https://github.com/kirodotdev/Kiro/issues/11281). O
+  `iron doctor --agent=kiro` só avisa; use `iron watch`, o portão da AWS e o CloudTrail onde couber.
+- **Kiro IDE: sem proteção** (o hook do IDE não recebe o comando; issues #7500 e #7375, não reconferidas).
+- **Só a saída 2 bloqueia.** JSON de resposta (`permissionDecision`) é ignorado, e exit 1 só avisa e libera.
+  Estourar o prazo libera o comando; sem o campo de prazo o v2 libera após ~10 s, por isso o `iron init` grava
+  `timeout_ms: 600000` (v2) e `timeout: 600` (v3) e o doctor falha se faltar.
+- **Dois formatos, dois arquivos.** O v2 só lê o hook de dentro do agente e ignora `.kiro/hooks`; o v3 lê o
+  `.kiro/hooks` e **não carrega** agente em formato v2 ("needs upgrading"). Se você converter um agente para o
+  v3 (auto-upgrade do Kiro), o hook passa a rodar **duas vezes** por comando no v3 (conta em dobro na memória
+  de sessão); o doctor avisa.
+- **O `kiro_default.json` do projeto substitui o agente padrão** do Kiro nessa pasta (sem o prompt longo dele).
+  Agentes que já existem são só acrescidos do hook.
+- **`matcher`:** no v2 é `shell`; no v3 é uma regex (`^(execute_bash|shell|execute_cmd)$`). O `*` do v2 não
+  compila como regex e o v3 descarta o hook sem avisar. `execute_cmd` (Windows) só consta na documentação.
+- **Sem variável com a raiz do projeto:** vale o `cwd` do stdin. O `tool_input.cwd` do v3 é ignorado de
+  propósito (quem o preenche é o modelo).
+- **Fora do escopo:** `--harden` (o Iron Shield usa regras de permissão do Claude), etiqueta da AWS e
+  `iron watch` para o Kiro (sem leitor de transcript verificado).
+- **O modelo pode recusar antes do hook:** nos testes o Kiro às vezes se recusou a chamar a ferramenta; isso
+  não é o Iron Brake.
+

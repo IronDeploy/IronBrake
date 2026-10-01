@@ -1,7 +1,7 @@
 # Iron Brake
 
 O Iron Brake é um freio para agentes de IA no terminal. Ele roda como hook do
-Claude Code e analisa cada comando **antes** de ele executar: libera o que é
+agente (Claude Code ou Kiro CLI) e analisa cada comando **antes** de ele executar: libera o que é
 seguro, pede sua confirmação para o que é arriscado e bloqueia o que destrói.
 
 ## Instalação (macOS e Linux)
@@ -176,6 +176,22 @@ partir de "Iron Brake:" é do Iron Brake.) O Claude recebe esse motivo e muda
 de estratégia (em geral, propõe um push
 normal ou pede que você mesmo rode o comando).
 
+## Agentes
+
+| Agente | Instalar na pasta do projeto | Estado |
+|---|---|---|
+| Claude Code | `iron init` | suportado |
+| Kiro CLI (engines v2 e v3, uso interativo e v2 não interativo) | `iron init --agent=kiro` e `iron doctor --agent=kiro` | suportado, verificado com o Kiro CLI 2.26.1 em 2026-10-01 |
+| Kiro CLI v3 com `--no-interactive` | | **não suportado**: o Kiro não executa hooks nesse modo |
+| Kiro IDE | | **não suportado**: o hook do IDE não recebe o comando |
+
+No Kiro, o `iron init` grava o hook nos dois formatos: dentro do agente (`.kiro/agents/`, o v2 só
+lê assim) e em `.kiro/hooks/iron-brake.json` (o v3). Se a pasta não tem `kiro_default.json`, ele
+cria um mínimo, que **substitui o agente padrão do Kiro nessa pasta** (sem o prompt longo dele); agentes
+que já existem recebem o hook sem perder o resto. O Kiro não entende "perguntar": quando o Iron Brake
+precisaria perguntar, ele mostra a própria janela (macOS) e, sem janela, bloqueia. Limites em
+[doc/known-issues.md](doc/known-issues.md) (seção 19).
+
 ## Iron Shield: o que o agente enxerga
 
 O freio (Iron Brake) barra a ação; o **Iron Shield** ataca a causa — a
@@ -207,7 +223,7 @@ caminho do agente. Detalhes e tabela completa em [doc/iron-shield.md](doc/iron-s
 
 **Escopo**
 
-- Só enxerga comandos de terminal (a ferramenta Bash do Claude Code).
+- Só enxerga comandos de terminal (a ferramenta Bash do Claude Code; no Kiro, a ferramenta de shell).
   Arquivos editados, chamadas de MCP e APIs não passam por ele.
 - Não substitui permissões mínimas. Se o agente usa uma credencial que pode
   apagar o banco de produção, o banco está em risco: a credencial do agente
