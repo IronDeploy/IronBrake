@@ -376,7 +376,8 @@ reconhecer o primeiro (cada comando passava duas vezes pelo Iron Brake).
 Verificado com o Kiro CLI **2.26.1** (macOS), em 2026-10-01, com o agente real e o `iron` real: bloqueio de
 `git push --force` e liberação de comando seguro no v2 (interativo e não interativo) e no v3 interativo;
 `ask` resolvido pela janela do Iron Brake (Executar → roda, Cancelar → bloqueia); prazo de 600 s
-respeitado; `agent: kiro` no log. Não verificado: Linux, Windows, outras versões do Kiro.
+respeitado; `agent: kiro` no log. Em **Linux** (Docker, usuário não root) foi verificado o binário `iron` real: `init`, `doctor`, hook com os
+dois payloads, `ask` sem janela virando bloqueio e corrente do log íntegra; o **Kiro de verdade não foi rodado em Linux**. Não verificado: Windows, outras versões do Kiro.
 
 - **v3 com `--no-interactive` não executa hooks** (o comando passa sem o Iron Brake, sem erro). Reproduzido
   aqui para o `preToolUse`; é a issue [kirodotdev/Kiro#11281](https://github.com/kirodotdev/Kiro/issues/11281). O
