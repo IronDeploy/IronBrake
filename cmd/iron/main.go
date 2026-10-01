@@ -1,15 +1,16 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/IronDeploy/IronBrake/internal/audit"
+	"github.com/IronDeploy/IronBrake/internal/cloudtrail"
 	"github.com/IronDeploy/IronBrake/internal/dialog"
 	"github.com/IronDeploy/IronBrake/internal/doctor"
 	"github.com/IronDeploy/IronBrake/internal/hook"
@@ -23,6 +24,7 @@ import (
 	"github.com/IronDeploy/IronBrake/internal/shieldui"
 	"github.com/IronDeploy/IronBrake/internal/tfplan"
 	"github.com/IronDeploy/IronBrake/internal/toolpath"
+	"github.com/IronDeploy/IronBrake/internal/watch"
 )
 
 // version é definida na compilação com -ldflags "-X main.version=...".
@@ -32,14 +34,16 @@ const (
 	approvedByUserReason = "Iron Brake: aprovado pelo usuário na janela de confirmação."
 	rejectedByUserReason = "Iron Brake: o usuário recusou este comando na janela de confirmação. não tente de novo; siga com o resto da tarefa ou pergunte ao usuário o que fazer."
 	timeoutReason        = "Iron Brake: a análise passou do tempo limite; bloqueado por segurança. tente de novo ou peça ao usuário para executar."
+	cannotAskReason      = "Iron Brake: este comando precisa da confirmação do usuário, mas este agente não sabe perguntar e a janela de confirmação não está disponível. não tente de novo; peça ao usuário para executá-lo."
 )
 
 const doctorTimeout = 5 * time.Second
 
 const usage = `uso: iron <subcomando>
 
-  hook          roda como hook PreToolUse do Claude Code (lê o evento pelo stdin)
-  init          instala o hook em .claude/settings.json da pasta atual
+  hook          roda como hook de pré-execução do agente (lê o evento pelo stdin; --agent=claude)
+  init          instala o hook em .claude/settings.json da pasta atual e a etiqueta do agente na AWS
+  init --no-aws-tag  instala só o hook, sem gravar AWS_SDK_UA_APP_ID no env do agente
   init --harden grava também regras deny de leitura das credenciais (Iron Shield)
   doctor        verifica se o hook desta pasta está mesmo protegendo
   scan          raio-X das credenciais ao alcance do agente (Iron Shield, só leitura)
@@ -48,6 +52,9 @@ const usage = `uso: iron <subcomando>
   shield lock   trava a leitura das credenciais (não precisa de "init" antes)
   shield unlock destrava a leitura — credenciais ficam visíveis ao agente até travar de novo
   audit verify  confere se a corrente do log de auditoria (~/.iron/audit.log) está íntegra
+  aws-alerts    imprime o modelo CloudFormation que alerta quando um agente chama API destrutiva na AWS
+  aws-creds     portão de credenciais da AWS para o credential_process (iron aws-creds --help)
+  watch         confere de fora se o hook está vendo o que o agente executa (iron watch --help)
   version       mostra a versão`
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -58,9 +65,16 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	switch args[0] {
 	case "hook":
+		agent, err := parseAgentFlag(args[1:])
+		if err != nil {
+			fmt.Fprintf(stderr, "iron: %v\n", err)
+			return 2
+		}
+		budget := agent.Capabilities().Budget()
 		return runHook(stdin, stdout, stderr, hookDeps{
-			readPlan: showPlan, confirm: dialog.Confirm, loadEnv: loadEnv, session: checkSession, audit: writeAudit,
-			deadline: hook.Deadline,
+			readPlan: showPlan, loadEnv: loadEnv, session: checkSession, audit: writeAudit,
+			confirm:  func(reason string) dialog.Answer { return dialog.ConfirmWithin(reason, budget.DialogWait) },
+			deadline: budget.Deadline, agent: agent,
 		})
 	case "init":
 		return initHere(args[1:], stdout, stderr)
@@ -75,6 +89,21 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runShield(args[1:], stdout, stderr)
 	case "audit":
 		return runAudit(args[1:], stdout, stderr)
+	case "aws-alerts":
+		fmt.Fprint(stdout, cloudtrail.Template())
+		return 0
+	case "aws-creds":
+		if slices.Contains(args[1:], "--help") || slices.Contains(args[1:], "-h") {
+			fmt.Fprintln(stdout, awsCredsUsage)
+			return 0
+		}
+		return runAWSCredsCommand(args[1:], stdout, stderr)
+	case "watch":
+		if slices.Contains(args[1:], "--help") || slices.Contains(args[1:], "-h") {
+			fmt.Fprintln(stdout, watchUsage)
+			return 0
+		}
+		return runWatchCommand(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintf(stdout, "iron %s\n", version)
 		return 0
@@ -82,6 +111,24 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "iron: subcomando desconhecido %q\n\n%s\n", args[0], usage)
 		return 2
 	}
+}
+
+// parseAgentFlag lê "--agent=NOME" (ou "--agent NOME"); sem a opção, vale o
+// agente padrão.
+func parseAgentFlag(args []string) (hook.Agent, error) {
+	name := hook.DefaultAgent
+	for i := 0; i < len(args); i++ {
+		switch value, ok := strings.CutPrefix(args[i], "--agent="); {
+		case ok:
+			name = value
+		case args[i] == "--agent" && i+1 < len(args):
+			i++
+			name = args[i]
+		default:
+			return nil, fmt.Errorf("opção desconhecida %q em \"iron hook\"", args[i])
+		}
+	}
+	return hook.Lookup(name)
 }
 
 // hookDeps reúne o que o hook usa do mundo externo, para os testes trocarem.
@@ -92,6 +139,15 @@ type hookDeps struct {
 	session  func(sessionID string, a session.Activity) (hook.Decision, string)
 	audit    func(audit.Entry, policy.AuditLog) error // a rotação vem do policy.yaml do projeto
 	deadline time.Duration
+	agent    hook.Agent // nil = hook.DefaultAgent
+}
+
+func (d hookDeps) agentOrDefault() hook.Agent {
+	if d.agent != nil {
+		return d.agent
+	}
+	agent, _ := hook.Lookup(hook.DefaultAgent)
+	return agent
 }
 
 type verdict struct {
@@ -109,33 +165,34 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer, deps hookDeps) int {
 		auditErr error
 	}
 	done := make(chan outcome, 1)
+	agent := deps.agentOrDefault()
 
 	go func() {
-		var event hook.PreToolUseEvent
-		if err := json.NewDecoder(stdin).Decode(&event); err != nil {
+		event, err := agent.ParseEvent(stdin)
+		if err != nil {
 			v := verdict{decision: hook.Deny, reason: "iron: não consegui ler o evento do stdin", rule: "event"}
-			done <- outcome{v, record(deps, audit.Entry{Class: "evento ilegível"}, v, policy.AuditLog{})}
+			done <- outcome{v, record(deps, audit.Entry{Agent: agent.Name(), Class: "evento ilegível"}, v, policy.AuditLog{})}
 			return
 		}
 		v, changes, auditCfg := decide(event, deps)
-		entry := audit.Entry{Session: event.SessionID, Class: classOf(event), Resources: changes}
+		entry := audit.Entry{Session: event.SessionID, Agent: agent.Name(), Class: classOf(event), Resources: changes}
 		done <- outcome{v, record(deps, entry, v, auditCfg)}
 	}()
 
 	select {
 	case o := <-done:
-		code := hook.Respond(stdout, stderr, o.v.decision, o.v.reason)
+		code := agent.Respond(stdout, stderr, o.v.decision, o.v.reason)
 		if o.auditErr != nil {
 			fmt.Fprintln(stderr, "iron: não consegui gravar o log de auditoria")
 		}
 		return code
 	case <-time.After(deps.deadline):
-		return hook.Respond(stdout, stderr, hook.Deny, timeoutReason)
+		return agent.Respond(stdout, stderr, hook.Deny, timeoutReason)
 	}
 }
 
-func decide(event hook.PreToolUseEvent, deps hookDeps) (verdict, []audit.Resource, policy.AuditLog) {
-	command := event.ToolInput.Command
+func decide(event hook.Event, deps hookDeps) (verdict, []audit.Resource, policy.AuditLog) {
+	command := event.Command
 	env := deps.loadEnv(event.Cwd)
 
 	checked := rules.Evaluate(command, env)
@@ -161,7 +218,7 @@ func decide(event hook.PreToolUseEvent, deps hookDeps) (verdict, []audit.Resourc
 	}
 
 	if v.decision == hook.Ask {
-		v = confirmAsk(command, v, deps.confirm)
+		v = confirmAsk(command, v, deps.confirm, deps.agentOrDefault().Capabilities().CanAsk)
 	}
 	return v, changes, env.Policy.AuditLog
 }
@@ -174,11 +231,11 @@ func record(deps hookDeps, entry audit.Entry, v verdict, cfg policy.AuditLog) er
 	return deps.audit(entry, cfg)
 }
 
-func classOf(event hook.PreToolUseEvent) string {
-	if event.ToolName != "" && event.ToolName != "Bash" {
-		return "ferramenta " + event.ToolName
+func classOf(event hook.Event) string {
+	if !event.Shell {
+		return "ferramenta " + event.Tool
 	}
-	if class := rules.Classify(event.ToolInput.Command); class != "" {
+	if class := rules.Classify(event.Command); class != "" {
 		return class
 	}
 	return "vazio"
@@ -226,7 +283,7 @@ func showPlan(req tfplan.Request) ([]byte, error) {
 		return nil, err
 	}
 	req.Config = cfg
-	req.ProjectDirs = []string{os.Getenv("CLAUDE_PROJECT_DIR"), req.Cwd}
+	req.ProjectDirs = []string{hook.ProjectDir(os.Getenv), req.Cwd}
 	return tfplan.Show(req)
 }
 
@@ -243,7 +300,7 @@ func auditLog(cfg policy.AuditLog) audit.Log {
 // projectAuditConfig lê a rotação do policy.yaml do projeto atual, para os
 // comandos que rodam no terminal (shield). Política ausente ou com erro: padrão.
 func projectAuditConfig() policy.AuditLog {
-	dir := os.Getenv("CLAUDE_PROJECT_DIR")
+	dir := hook.ProjectDir(os.Getenv)
 	if dir == "" {
 		dir, _ = os.Getwd()
 	}
@@ -251,10 +308,10 @@ func projectAuditConfig() policy.AuditLog {
 	return p.AuditLog
 }
 
-// loadEnv usa a política de CLAUDE_PROJECT_DIR (ou da pasta do comando).
+// loadEnv usa a política da raiz do projeto do agente (ou da pasta do comando).
 // Política com erro vira PolicyError, e as regras tratam tudo como produção.
 func loadEnv(cwd string) rules.Env {
-	projectDir := os.Getenv("CLAUDE_PROJECT_DIR")
+	projectDir := hook.ProjectDir(os.Getenv)
 	if projectDir == "" {
 		projectDir = cwd
 	}
@@ -275,8 +332,9 @@ func readContextFile(path string) ([]byte, error) {
 }
 
 // confirmAsk mostra o motivo numa janela do sistema, porque a caixa do Claude
-// Code não o mostra antes da decisão.
-func confirmAsk(command string, v verdict, confirm func(string) dialog.Answer) verdict {
+// Code não o mostra antes da decisão. Se a janela não resolveu e o agente não
+// entende "ask", o resultado é deny: nunca allow.
+func confirmAsk(command string, v verdict, confirm func(string) dialog.Answer, canAsk bool) verdict {
 	answer := confirm(v.reason)
 	v.dialog = string(answer)
 
@@ -291,6 +349,10 @@ func confirmAsk(command string, v verdict, confirm func(string) dialog.Answer) v
 		v.decision, v.reason = hook.UserApproved, approvedByUserReason
 	case dialog.Rejected:
 		v.decision, v.reason = hook.Deny, rejectedByUserReason+"\n\n"+v.reason
+	}
+
+	if v.decision == hook.Ask && !canAsk {
+		v.decision, v.reason = hook.Deny, cannotAskReason+"\n\n"+v.reason
 	}
 	return v
 }
@@ -325,7 +387,7 @@ func runAudit(args []string, stdout, stderr io.Writer) int {
 }
 
 func initHere(args []string, stdout, stderr io.Writer) int {
-	harden := slices.Contains(args, "--harden")
+	opts := initOptions{harden: slices.Contains(args, "--harden"), awsTag: !slices.Contains(args, "--no-aws-tag")}
 	dir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(stderr, "iron: %v\n", err)
@@ -336,10 +398,20 @@ func initHere(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "iron: %v\n", err)
 		return 1
 	}
-	return runInit(dir, exePath, harden, stdout, stderr)
+	// os.Executable() não normaliza: "../bin/iron" vira ".../a/../bin/iron", e o
+	// hook ficaria gravado com esse caminho.
+	return runInit(dir, filepath.Clean(exePath), opts, stdout, stderr)
 }
 
-func runInit(dir, exePath string, harden bool, stdout, stderr io.Writer) int {
+type initOptions struct {
+	harden bool // grava as regras deny de leitura de credenciais (Iron Shield)
+	awsTag bool // grava AWS_SDK_UA_APP_ID no env do agente, para o CloudTrail
+}
+
+// awsTagVar é a variável do SDK da AWS que acrescenta app/<valor> ao user agent.
+const awsTagVar = "AWS_SDK_UA_APP_ID"
+
+func runInit(dir, exePath string, opts initOptions, stdout, stderr io.Writer) int {
 	settingsPath := setup.SettingsPath(dir)
 
 	changed, err := setup.InstallHook(settingsPath, exePath)
@@ -354,7 +426,11 @@ func runInit(dir, exePath string, harden bool, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "iron: o hook já estava instalado em %s\n", settingsPath)
 	}
 
-	if harden {
+	if opts.awsTag {
+		reportAWSTag(settingsPath, stdout, stderr)
+	}
+
+	if opts.harden {
 		added, err := setup.Harden(settingsPath)
 		if err != nil {
 			fmt.Fprintf(stderr, "iron: %v\n", err)
@@ -367,6 +443,23 @@ func runInit(dir, exePath string, harden bool, stdout, stderr io.Writer) int {
 		}
 	}
 	return 0
+}
+
+// reportAWSTag grava a etiqueta do agente e diz o que fez. Falhar aqui não
+// desfaz a instalação do hook: é um aviso.
+func reportAWSTag(settingsPath string, stdout, stderr io.Writer) {
+	appID := hook.Claude.Capabilities().AppID
+	changed, current, err := setup.SetEnv(settingsPath, awsTagVar, appID)
+	switch {
+	case err != nil:
+		fmt.Fprintf(stderr, "iron: aviso: não consegui gravar %s: %v\n", awsTagVar, err)
+	case changed:
+		fmt.Fprintf(stdout, "iron: etiqueta do agente na AWS gravada (%s=%s): o CloudTrail passa a mostrar app/%s nas chamadas dele\n", awsTagVar, appID, appID)
+	case current == appID:
+		fmt.Fprintf(stdout, "iron: a etiqueta do agente na AWS já estava gravada (%s=%s)\n", awsTagVar, appID)
+	default:
+		fmt.Fprintf(stdout, "iron: aviso: %s já vale %q neste projeto; não alterei, e o CloudTrail não vai mostrar app/%s\n", awsTagVar, current, appID)
+	}
 }
 
 // localFilesystem monta o Filesystem que o Iron Shield varre nesta máquina:
@@ -561,12 +654,32 @@ func doctorHere(stdout, stderr io.Writer) int {
 	return runDoctor(dir, stdout)
 }
 
+// coverageWindow é o quanto o doctor olha para trás ao conferir se o hook está
+// vendo os comandos; nunca antes de o hook ser instalado.
+const coverageWindow = 24 * time.Hour
+
 func runDoctor(dir string, stdout io.Writer) int {
-	results := doctor.RunAll(setup.SettingsPath(dir), version, doctorTimeout, doctor.Extra{
-		Log:        audit.Log{Path: audit.DefaultPath()},
+	log := audit.Log{Path: audit.DefaultPath()}
+	settingsPath := setup.SettingsPath(dir)
+	extra := doctor.Extra{
+		Log:        log,
 		ConfigPath: toolpath.ConfigPath(),
 		ProjectDir: dir,
-	})
+		AWSTag:     hook.Claude.Capabilities().AppID,
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		since := time.Now().Add(-coverageWindow)
+		if info, err := os.Stat(settingsPath); err == nil && info.ModTime().After(since) {
+			since = info.ModTime() // o hook não existia antes disto
+		}
+		extra.Coverage = &doctor.Coverage{
+			Dirs:   []string{watch.TranscriptDir(home, dir)},
+			Source: watch.Source{Classify: rules.Classify, Entries: log.Entries},
+			Since:  since,
+		}
+	}
+
+	results := doctor.RunAll(settingsPath, version, doctorTimeout, extra)
 	doctor.Print(stdout, results)
 	if !doctor.AllOK(results) {
 		return 1

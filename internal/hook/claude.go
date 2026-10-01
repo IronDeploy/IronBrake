@@ -7,6 +7,45 @@ import (
 	"time"
 )
 
+// Claude é o agente Claude Code.
+var Claude Agent = claudeAgent{}
+
+type claudeAgent struct{}
+
+func (claudeAgent) Name() string { return "claude" }
+
+func (claudeAgent) Capabilities() Capabilities {
+	return Capabilities{CanAsk: true, Timeout: 600 * time.Second, AppID: "iron-claude"}
+}
+
+// claudeEvent é o JSON que o Claude Code envia pelo stdin antes de executar
+// uma ferramenta (só os campos usados).
+type claudeEvent struct {
+	ToolName  string `json:"tool_name"`
+	ToolInput struct {
+		Command string `json:"command"`
+	} `json:"tool_input"`
+
+	SessionID string `json:"session_id"`
+
+	// Cwd é onde o comando vai rodar; o shell do Claude Code lembra os cd.
+	Cwd string `json:"cwd"`
+}
+
+func (claudeAgent) ParseEvent(stdin io.Reader) (Event, error) {
+	var in claudeEvent
+	if err := json.NewDecoder(stdin).Decode(&in); err != nil {
+		return Event{}, err
+	}
+	return Event{
+		Command:   in.ToolInput.Command,
+		Tool:      in.ToolName,
+		Shell:     in.ToolName == "" || in.ToolName == "Bash",
+		SessionID: in.SessionID,
+		Cwd:       in.Cwd,
+	}, nil
+}
+
 type Decision string
 
 const (
@@ -46,9 +85,7 @@ type decisionDetails struct {
 	PermissionDecisionReason string `json:"permissionDecisionReason"`
 }
 
-// Respond escreve a resposta e devolve o código de saída. Qualquer falha ou
-// decisão desconhecida bloqueia.
-func Respond(stdout, stderr io.Writer, decision Decision, reason string) int {
+func (claudeAgent) Respond(stdout, stderr io.Writer, decision Decision, reason string) int {
 	switch decision {
 	case Allow:
 		return exitOK

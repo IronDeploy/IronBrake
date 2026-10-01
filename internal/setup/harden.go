@@ -164,5 +164,5 @@ func writeDenyRules(settingsPath string, doc document, deny []string) error {
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(settingsPath, append(out, '\n'), 0o644)
+	return writeFileAtomic(settingsPath, append(out, '\n'))
 }

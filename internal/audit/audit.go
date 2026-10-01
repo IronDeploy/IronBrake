@@ -29,6 +29,7 @@ const tailSize = 64 * 1024
 type Entry struct {
 	Time      time.Time  `json:"time"`
 	Session   string     `json:"session"`
+	Agent     string     `json:"agent,omitempty"`     // agente que chamou o hook, ex.: "claude"
 	Class     string     `json:"class"`               // ex.: "terraform apply", "git push", "outro"
 	Decision  string     `json:"decision"`            // allow, ask, deny ou userApproved
 	Rule      string     `json:"rule,omitempty"`      // regra(s) que decidiram, ex.: "git-force-push"
@@ -372,6 +373,53 @@ func (l Log) files() []string {
 		paths = append(paths, l.Path)
 	}
 	return paths
+}
+
+// Entries devolve, do mais antigo ao mais novo, as entradas gravadas a partir
+// de since (zero = todas). Lê sem travar o log: uma linha ainda sendo gravada
+// (o último pedaço do arquivo) é ignorada. Não confere a corrente; para isso
+// existe Verify.
+func (l Log) Entries(since time.Time) ([]Entry, error) {
+	files := l.files()
+	var groups [][]Entry
+
+	// Do arquivo mais novo para o mais antigo; para quando um arquivo já
+	// começa antes de since.
+	for i := len(files) - 1; i >= 0; i-- {
+		entries, err := readEntries(files[i])
+		if err != nil {
+			return nil, err
+		}
+		reachedOlder := len(entries) > 0 && !since.IsZero() && entries[0].Time.Before(since)
+		entries = slices.DeleteFunc(entries, func(e Entry) bool { return e.Time.Before(since) })
+		groups = append(groups, entries)
+		if reachedOlder {
+			break
+		}
+	}
+
+	var result []Entry
+	for i := len(groups) - 1; i >= 0; i-- {
+		result = append(result, groups[i]...)
+	}
+	return result, nil
+}
+
+func readEntries(path string) ([]Entry, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var entries []Entry
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		var e Entry
+		// Linha sem horário não é uma decisão nossa: deixá-la entrar faria
+		// Entries achar que o arquivo já começa "antes" e parar de ler.
+		if len(line) > 0 && json.Unmarshal(line, &e) == nil && !e.Time.IsZero() {
+			entries = append(entries, e)
+		}
+	}
+	return entries, nil
 }
 
 // Verify percorre o log (do arquivo rotacionado mais antigo ao atual)

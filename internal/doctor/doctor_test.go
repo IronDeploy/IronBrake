@@ -3,6 +3,7 @@ package doctor
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"github.com/IronDeploy/IronBrake/internal/audit"
+	"github.com/IronDeploy/IronBrake/internal/rules"
+	"github.com/IronDeploy/IronBrake/internal/watch"
 )
 
 const (
@@ -388,5 +391,158 @@ func TestRunAllPutsAuditBeforeVersion(t *testing.T) {
 	assertOK(t, results, true, true, true, true, true, true, true)
 	if results[4].Name != nameTools || results[5].Name != nameAudit || results[6].Detail != testVersion {
 		t.Errorf("ordem: %q, %q, %q", results[4].Name, results[5].Name, results[6].Name)
+	}
+}
+
+const covSession = "11111111-2222-3333-4444-555555555555"
+
+func covLine(kind, id, command string, at time.Time) string {
+	stamp := at.UTC().Format("2006-01-02T15:04:05.000Z")
+	if kind == "use" {
+		return `{"type":"assistant","sessionId":"` + covSession + `","timestamp":"` + stamp + `","message":{"content":[{"type":"tool_use","id":"` + id + `","name":"Bash","input":{"command":"` + command + `"}}]}}`
+	}
+	return `{"type":"user","sessionId":"` + covSession + `","timestamp":"` + stamp + `","message":{"content":[{"type":"tool_result","tool_use_id":"` + id + `","content":"ok"}]}}`
+}
+
+func covSource(entries ...audit.Entry) watch.Source {
+	return watch.Source{
+		Classify: rules.Classify,
+		Entries: func(since time.Time) ([]audit.Entry, error) {
+			var out []audit.Entry
+			for _, e := range entries {
+				if !e.Time.Before(since) {
+					out = append(out, e)
+				}
+			}
+			return out, nil
+		},
+	}
+}
+
+func covDir(t *testing.T, lines ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, covSession+".jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestCheckCoverage(t *testing.T) {
+	now := time.Now()
+	since := now.Add(-time.Hour)
+	covered := audit.Entry{Time: now.Add(-10*time.Minute + 500*time.Millisecond), Session: covSession, Class: "git status", Decision: "allow"}
+	status := []string{covLine("use", "a", "git status", now.Add(-10*time.Minute)), covLine("result", "a", "", now.Add(-10*time.Minute+time.Second))}
+
+	t.Run("sem pasta de transcripts: nada a conferir", func(t *testing.T) {
+		got := CheckCoverage(Coverage{Dirs: []string{filepath.Join(t.TempDir(), "nao-existe")}, Source: covSource(), Since: since})
+		if !got.OK || !strings.Contains(got.Detail, "nada a conferir") {
+			t.Errorf("%+v", got)
+		}
+	})
+
+	t.Run("nenhum comando no período", func(t *testing.T) {
+		got := CheckCoverage(Coverage{Dirs: []string{covDir(t, `{"type":"queue-operation"}`)}, Source: covSource(), Since: since})
+		if !got.OK || !strings.Contains(got.Detail, "nenhum comando") {
+			t.Errorf("%+v", got)
+		}
+	})
+
+	t.Run("todos com decisão", func(t *testing.T) {
+		got := CheckCoverage(Coverage{Dirs: []string{covDir(t, status...)}, Source: covSource(covered), Since: since})
+		if !got.OK || !strings.Contains(got.Detail, "todos com decisão") || got.Fix != "" {
+			t.Errorf("%+v", got)
+		}
+	})
+
+	t.Run("comando sem decisão falha e diz como corrigir", func(t *testing.T) {
+		got := CheckCoverage(Coverage{Dirs: []string{covDir(t, status...)}, Source: covSource(), Since: since})
+		if got.OK || !strings.Contains(got.Detail, "1 de 1") || !strings.Contains(got.Fix, "reinicie a sessão") {
+			t.Errorf("%+v", got)
+		}
+		if got.Name != nameCoverage {
+			t.Errorf("nome: %q", got.Name)
+		}
+	})
+
+	t.Run("o que veio antes do hook não conta", func(t *testing.T) {
+		got := CheckCoverage(Coverage{Dirs: []string{covDir(t, status...)}, Source: covSource(), Since: now})
+		if !got.OK || !strings.Contains(got.Detail, "nenhum comando") {
+			t.Errorf("antes do desde: %+v", got)
+		}
+	})
+
+	t.Run("erro ao ler as decisões", func(t *testing.T) {
+		src := watch.Source{Classify: rules.Classify, Entries: func(time.Time) ([]audit.Entry, error) { return nil, errors.New("log ilegível") }}
+		got := CheckCoverage(Coverage{Dirs: []string{covDir(t, status...)}, Source: src, Since: since})
+		if got.OK || got.Fix == "" {
+			t.Errorf("%+v", got)
+		}
+	})
+}
+
+func TestCheckAWSTag(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"gravada", `{"env":{"AWS_SDK_UA_APP_ID":"iron-claude"}}`, "mostra app/iron-claude"},
+		{"ausente", `{"hooks":{}}`, "não gravada"},
+		{"sem env", `{}`, "não gravada"},
+		{"outro valor", `{"env":{"AWS_SDK_UA_APP_ID":"meu-app"}}`, `vale "meu-app"`},
+		{"env inválido", `{"env": 5}`, "não consegui ler o env"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := writeSettings(t, t.TempDir(), c.content)
+			got := CheckAWSTag(path, "iron-claude")
+			if !got.OK || !strings.Contains(got.Detail, c.want) || got.Fix != "" {
+				t.Errorf("%+v", got)
+			}
+		})
+	}
+
+	if got := CheckAWSTag(filepath.Join(t.TempDir(), "nao-existe.json"), "iron-claude"); !got.OK || !strings.Contains(got.Detail, "não consegui ler") {
+		t.Errorf("sem arquivo: %+v", got)
+	}
+}
+
+func TestRunAllWithCoverageAndTag(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	dir := t.TempDir()
+	iron := newFakeIron(t, dir, scriptDeny, 0o755)
+	path := writeSettings(t, dir, settingsWith(t, "Bash", iron))
+	log := audit.Log{Path: filepath.Join(dir, ".iron", "audit.log")}
+	now := time.Now()
+
+	results := RunAll(path, testVersion, testTimeout, Extra{
+		Log: log, ConfigPath: filepath.Join(dir, "config.yaml"), ProjectDir: dir,
+		Coverage: &Coverage{Dirs: []string{filepath.Join(dir, "sem-transcripts")}, Source: covSource(), Since: now},
+		AWSTag:   "iron-claude",
+	})
+
+	assertOK(t, results, true, true, true, true, true, true, true, true, true)
+	order := []string{nameTools, nameAudit, nameCoverage, nameAWSTag}
+	for i, want := range order {
+		if results[4+i].Name != want {
+			t.Errorf("posição %d: %q, esperava %q", 5+i, results[4+i].Name, want)
+		}
+	}
+	if results[8].Detail != testVersion {
+		t.Errorf("a versão continua por último: %q", results[8].Detail)
+	}
+}
+
+func TestRunAllSkipsOptionalChecksByDefault(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	dir := t.TempDir()
+	iron := newFakeIron(t, dir, scriptDeny, 0o755)
+	path := writeSettings(t, dir, settingsWith(t, "Bash", iron))
+
+	results := RunAll(path, testVersion, testTimeout, Extra{Log: audit.Log{Path: filepath.Join(dir, ".iron", "audit.log")}, ConfigPath: filepath.Join(dir, "config.yaml"), ProjectDir: dir})
+
+	if len(results) != 7 {
+		t.Errorf("sem Coverage e AWSTag, são as 7 de sempre: %d", len(results))
 	}
 }

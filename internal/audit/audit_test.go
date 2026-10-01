@@ -453,3 +453,64 @@ func TestLowerKeepPrunesSeveralFilesAndKeepsChain(t *testing.T) {
 		t.Errorf("a corrente deveria continuar íntegra depois de podar vários: %+v", r)
 	}
 }
+
+func TestEntriesSinceAcrossRotatedFiles(t *testing.T) {
+	log := Log{Path: filepath.Join(t.TempDir(), "audit.log"), MaxSize: 1, Keep: 5}
+	base := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < 4; i++ {
+		if err := log.Append(Entry{Time: base.Add(time.Duration(i) * time.Minute), Class: "c", Decision: "allow"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	all, err := log.Entries(time.Time{})
+	if err != nil || len(all) != 4 {
+		t.Fatalf("todas: %d %v", len(all), err)
+	}
+	for i := 1; i < len(all); i++ {
+		if all[i].Time.Before(all[i-1].Time) {
+			t.Errorf("fora de ordem: %v antes de %v", all[i-1].Time, all[i].Time)
+		}
+	}
+
+	recent, _ := log.Entries(base.Add(2 * time.Minute))
+	if len(recent) != 2 {
+		t.Errorf("desde o minuto 2: esperava 2, obtive %d", len(recent))
+	}
+
+	// Linha ainda sendo gravada (sem JSON completo) é ignorada.
+	f, _ := os.OpenFile(log.Path, os.O_APPEND|os.O_WRONLY, 0o600)
+	f.WriteString(`{"time":"2026-10-01T13`)
+	f.Close()
+	if got, err := log.Entries(time.Time{}); err != nil || len(got) != 4 {
+		t.Errorf("linha incompleta deve ser ignorada: %d %v", len(got), err)
+	}
+
+	if got, err := (Log{Path: filepath.Join(t.TempDir(), "nada.log")}).Entries(time.Time{}); err != nil || len(got) != 0 {
+		t.Errorf("sem log: %d %v", len(got), err)
+	}
+}
+
+func TestEntriesIgnoresLinesWithoutTime(t *testing.T) {
+	dir := t.TempDir()
+	log := Log{Path: filepath.Join(dir, "audit.log")}
+	base := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+
+	// Arquivo rotacionado com decisões recentes, e o atual começando por uma linha sem horário.
+	old := `{"time":"` + base.Add(time.Minute).Format(time.RFC3339Nano) + `","class":"git push","decision":"deny"}` + "\n"
+	cur := `{"class":"lixo"}` + "\n" + `{"time":"` + base.Add(2*time.Minute).Format(time.RFC3339Nano) + `","class":"git status","decision":"allow"}` + "\n"
+	if err := os.WriteFile(log.Path+".1", []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(log.Path, []byte(cur), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := log.Entries(base)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("a linha sem horário não pode esconder o arquivo mais antigo: %d %v", len(got), err)
+	}
+	if got[0].Class != "git push" || got[1].Class != "git status" {
+		t.Errorf("ordem/conteúdo: %+v", got)
+	}
+}

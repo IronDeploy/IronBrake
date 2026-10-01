@@ -37,7 +37,7 @@ func TestRespond(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 
-			code := Respond(&stdout, &stderr, c.decision, c.reason)
+			code := Claude.Respond(&stdout, &stderr, c.decision, c.reason)
 
 			if code != c.wantCode {
 				t.Errorf("código de saída: esperava %d, obtive %d", c.wantCode, code)
@@ -55,7 +55,7 @@ func TestRespond(t *testing.T) {
 func TestRespondUnknownDecisionBlocks(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	code := Respond(&stdout, &stderr, Decision("maybe"), "")
+	code := Claude.Respond(&stdout, &stderr, Decision("maybe"), "")
 
 	if code != 2 {
 		t.Errorf("código de saída: esperava 2, obtive %d", code)
@@ -77,7 +77,7 @@ func (failingWriter) Write([]byte) (int, error) {
 func TestRespondAskWriteFailureBlocks(t *testing.T) {
 	var stderr bytes.Buffer
 
-	code := Respond(failingWriter{}, &stderr, Ask, "confirme")
+	code := Claude.Respond(failingWriter{}, &stderr, Ask, "confirme")
 
 	if code != 2 {
 		t.Errorf("código de saída: esperava 2, obtive %d", code)

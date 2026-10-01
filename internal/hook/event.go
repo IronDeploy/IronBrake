@@ -1,17 +1,20 @@
 package hook
 
-// PreToolUseEvent é o JSON que o Claude Code envia pelo stdin antes de
-// executar uma ferramenta (só os campos usados).
-type PreToolUseEvent struct {
-	ToolName  string    `json:"tool_name"`
-	ToolInput ToolInput `json:"tool_input"`
+// Event é uma chamada de ferramenta antes de executar, já traduzida do
+// formato do agente. O resto do Iron Brake só conhece este tipo.
+type Event struct {
+	// Command é o comando de shell. Vazio se a ferramenta não for shell.
+	Command string
 
-	SessionID string `json:"session_id"`
+	// Tool é o nome da ferramenta como o agente a chama.
+	Tool string
 
-	// Cwd é onde o comando vai rodar; o shell do Claude Code lembra os cd.
-	Cwd string `json:"cwd"`
-}
+	// Shell diz se a ferramenta executa comandos de shell. Cada Agent decide
+	// o que conta como shell (Claude Code: "Bash").
+	Shell bool
 
-type ToolInput struct {
-	Command string `json:"command"`
+	SessionID string
+
+	// Cwd é onde o comando vai rodar.
+	Cwd string
 }

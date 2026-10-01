@@ -66,7 +66,7 @@ func InstallHook(settingsPath, exePath string) (bool, error) {
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		return false, err
 	}
-	if err := os.WriteFile(settingsPath, append(out, '\n'), 0o644); err != nil {
+	if err := writeFileAtomic(settingsPath, append(out, '\n')); err != nil {
 		return false, err
 	}
 
@@ -128,7 +128,8 @@ func isInstalled(groups []json.RawMessage, ours handler) bool {
 		}
 
 		found := slices.ContainsFunc(group.Hooks, func(h handler) bool {
-			return h.Type == ours.Type && h.Command == ours.Command && slices.Equal(h.Args, ours.Args)
+			// O caminho é comparado limpo: "x/../bin/iron" e "bin/iron" são o mesmo programa.
+			return h.Type == ours.Type && filepath.Clean(h.Command) == filepath.Clean(ours.Command) && slices.Equal(h.Args, ours.Args)
 		})
 		if found {
 			return true
@@ -151,4 +152,81 @@ func encode(value any, indent string) ([]byte, error) {
 	}
 
 	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+}
+
+// SetEnv garante settings.env[key] = value. O resto do conteúdo fica, mas as
+// chaves do arquivo são reordenadas e reindentadas (o mesmo que o InstallHook faz).
+// Se a chave já existe com outro valor, não mexe: devolve o valor atual em
+// current (a pessoa escolheu aquele valor).
+func SetEnv(settingsPath, key, value string) (changed bool, current string, err error) {
+	settings := map[string]json.RawMessage{}
+	switch data, readErr := os.ReadFile(settingsPath); {
+	case errors.Is(readErr, fs.ErrNotExist):
+	case readErr != nil:
+		return false, "", readErr
+	default:
+		if settings, err = decodeObject(data); err != nil {
+			return false, "", fmt.Errorf("%s: %w", settingsPath, err)
+		}
+	}
+
+	env, err := decodeObject(settings["env"])
+	if err != nil {
+		return false, "", fmt.Errorf(`%s: a chave "env" %w`, settingsPath, err)
+	}
+
+	if raw, ok := env[key]; ok {
+		var existing string
+		if json.Unmarshal(raw, &existing) != nil {
+			existing = string(raw)
+		}
+		return false, existing, nil
+	}
+
+	if env[key], err = encode(value, ""); err != nil {
+		return false, "", err
+	}
+	if settings["env"], err = encode(env, ""); err != nil {
+		return false, "", err
+	}
+	out, err := encode(settings, "  ")
+	if err != nil {
+		return false, "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		return false, "", err
+	}
+	if err := writeFileAtomic(settingsPath, append(out, '\n')); err != nil {
+		return false, "", err
+	}
+	return true, value, nil
+}
+
+// writeFileAtomic grava num temporário ao lado e renomeia: uma falha no meio
+// nunca deixa o settings.json truncado (o que desligaria o hook). Mantém a
+// permissão do arquivo que já existia; um arquivo novo sai com 0644.
+func writeFileAtomic(path string, data []byte) error {
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name()) // some depois do rename; limpa se algo falhar
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }

@@ -1,0 +1,103 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Iron Brake: alerta (SNS) quando um agente de codigo chama uma API destrutiva ou de
+  permissoes na AWS. O agente e reconhecido pelo user agent app/<AppIdPrefix>*, que o
+  "iron init" grava em AWS_SDK_UA_APP_ID. Exige um trail do CloudTrail com logging
+  ativo nesta conta e regiao.
+
+Parameters:
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: E-mail que recebe o alerta (a AWS manda um pedido de confirmacao). Vazio = so cria o topico SNS.
+  AppIdPrefix:
+    Type: String
+    Default: "iron-"
+    AllowedPattern: "^[A-Za-z0-9._-]{1,40}$"
+    ConstraintDescription: ate 40 caracteres entre letras, numeros, ponto, hifen e sublinhado.
+    Description: Prefixo do AWS_SDK_UA_APP_ID dos agentes (o "iron init" usa iron-claude, entao iron-).
+
+Conditions:
+  HasEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+
+Resources:
+  AgentAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: Iron Brake - agente na AWS
+
+  AgentAlertsEmail:
+    Type: AWS::SNS::Subscription
+    Condition: HasEmail
+    Properties:
+      TopicArn: !Ref AgentAlertsTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  AgentAlertsRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Chamada destrutiva ou de permissoes feita por um agente (user agent app/<AppIdPrefix>*)
+      State: ENABLED
+      EventPattern:
+        detail-type:
+          - AWS API Call via CloudTrail
+        detail:
+          userAgent:
+            - wildcard: !Sub "*app/${AppIdPrefix}*"
+          eventName:
+            # Destrutivas: apagar, encerrar, desligar, desregistrar.
+            - prefix: Delete
+            - prefix: Terminate
+            - prefix: Deregister
+            - prefix: Disable
+            - prefix: Detach
+            - prefix: ScheduleKeyDeletion
+            - StopInstances
+            - PutBucketPolicy
+            # Permissoes: o agente se dando ou dando acesso.
+            - PutRolePolicy
+            - PutUserPolicy
+            - PutGroupPolicy
+            - AttachRolePolicy
+            - AttachUserPolicy
+            - AttachGroupPolicy
+            - UpdateAssumeRolePolicy
+            - CreateAccessKey
+            - CreateLoginProfile
+      Targets:
+        - Id: AgentAlertsTopic
+          Arn: !Ref AgentAlertsTopic
+          InputTransformer:
+            InputPathsMap:
+              name: $.detail.eventName
+              service: $.detail.eventSource
+              region: $.detail.awsRegion
+              time: $.detail.eventTime
+              who: $.detail.userIdentity.arn
+              agent: $.detail.userAgent
+            InputTemplate: >-
+              "Iron Brake: um agente chamou <name> (<service>) em <region> as <time>. Identidade: <who>. User agent: <agent>"
+
+  AgentAlertsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref AgentAlertsTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowEventBridgePublish
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref AgentAlertsTopic
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !GetAtt AgentAlertsRule.Arn
+
+Outputs:
+  TopicArn:
+    Description: Topico SNS que recebe os alertas (assine aqui um chat, uma fila ou outro e-mail)
+    Value: !Ref AgentAlertsTopic

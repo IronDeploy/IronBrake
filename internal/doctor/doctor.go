@@ -2,10 +2,12 @@ package doctor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -14,8 +16,10 @@ import (
 
 	"github.com/IronDeploy/IronBrake/internal/audit"
 	"github.com/IronDeploy/IronBrake/internal/hook"
+	"github.com/IronDeploy/IronBrake/internal/safefile"
 	"github.com/IronDeploy/IronBrake/internal/setup"
 	"github.com/IronDeploy/IronBrake/internal/toolpath"
+	"github.com/IronDeploy/IronBrake/internal/watch"
 )
 
 const testEvent = `{"tool_name":"Bash","tool_input":{"command":"git push --force origin main"}}`
@@ -28,6 +32,9 @@ const (
 	nameTools    = "os programas que o Iron Brake executa (terraform, tofu, terragrunt) são confiáveis"
 	nameAudit    = "o log de auditoria grava e a corrente está íntegra"
 	nameVersion  = "versão"
+
+	nameCoverage = "o hook está vendo os comandos que o agente executa (iron watch)"
+	nameAWSTag   = "etiqueta do agente na AWS (opcional)"
 )
 
 type Result struct {
@@ -65,6 +72,21 @@ type Extra struct {
 	Log        audit.Log
 	ConfigPath string // ~/.iron/config.yaml
 	ProjectDir string
+
+	// Coverage, se não for nil, confere nos transcripts do agente se cada comando
+	// recente teve uma decisão do hook.
+	Coverage *Coverage
+
+	// AWSTag, se não for vazio, é o AWS_SDK_UA_APP_ID que o "iron init" grava
+	// para o agente; o doctor só informa se ele está no settings.json.
+	AWSTag string
+}
+
+// Coverage diz onde conferir a cobertura do hook.
+type Coverage struct {
+	Dirs   []string     // pastas de transcripts
+	Source watch.Source // classe dos comandos e decisões gravadas
+	Since  time.Time    // só conta o que aconteceu depois (o hook não existia antes)
 }
 
 // RunAll é Run mais a verificação dos programas e a do log de auditoria, antes
@@ -73,7 +95,80 @@ type Extra struct {
 func RunAll(settingsPath, version string, timeout time.Duration, extra Extra) []Result {
 	results := Run(settingsPath, version, timeout)
 	last := len(results) - 1
-	return append(results[:last:last], CheckTools(extra.ConfigPath, extra.ProjectDir), CheckAudit(extra.Log), results[last])
+
+	middle := []Result{CheckTools(extra.ConfigPath, extra.ProjectDir), CheckAudit(extra.Log)}
+	if extra.Coverage != nil {
+		middle = append(middle, CheckCoverage(*extra.Coverage))
+	}
+	if extra.AWSTag != "" {
+		middle = append(middle, CheckAWSTag(settingsPath, extra.AWSTag))
+	}
+	return append(results[:last:last], append(middle, results[last])...)
+}
+
+// CheckCoverage falha se algum comando de shell dos transcripts rodou sem
+// nenhuma decisão do hook: o hook não está disparando (agente sem hook,
+// sessão aberta antes do "iron init", configuração errada). Sem transcripts ou
+// sem comandos, passa: não há o que conferir.
+func CheckCoverage(c Coverage) Result {
+	result := Result{Name: nameCoverage}
+
+	var dirs []string
+	for _, dir := range c.Dirs {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			dirs = append(dirs, dir)
+		}
+	}
+	if len(dirs) == 0 {
+		result.OK = true
+		result.Detail = "sem transcripts do Claude Code para esta pasta: nada a conferir"
+		return result
+	}
+
+	gaps, checked, _, err := watch.Scan(dirs, c.Source, c.Since)
+	switch {
+	case err != nil:
+		result.Detail = "não consegui ler os transcripts: " + err.Error()
+		result.Fix = "rode iron watch --once para ver o erro."
+	case checked == 0:
+		result.OK = true
+		result.Detail = "nenhum comando de shell desde " + c.Since.Local().Format("02/01 15:04")
+	case len(gaps) == 0:
+		result.OK = true
+		result.Detail = fmt.Sprintf("%d comando(s) de shell desde %s, todos com decisão do Iron Brake", checked, c.Since.Local().Format("02/01 15:04"))
+	default:
+		result.Detail = fmt.Sprintf("%d de %d comando(s) de shell desde %s rodaram SEM decisão do Iron Brake", len(gaps), checked, c.Since.Local().Format("02/01 15:04"))
+		result.Fix = "o hook não está disparando para esse agente. Se instalou o hook com o agente aberto, reinicie a sessão; senão, confira /hooks no Claude Code. Rode iron watch --once para ver quais."
+	}
+	return result
+}
+
+// CheckAWSTag só informa: a etiqueta é opcional (iron init --no-aws-tag).
+func CheckAWSTag(settingsPath, appID string) Result {
+	result := Result{Name: nameAWSTag, OK: true}
+
+	data, err := safefile.Read(settingsPath, 1<<20)
+	if err != nil {
+		result.Detail = "não consegui ler o settings.json"
+		return result
+	}
+	var doc struct {
+		Env map[string]string `json:"env"`
+	}
+	if json.Unmarshal(data, &doc) != nil {
+		result.Detail = "não consegui ler o env do settings.json"
+		return result
+	}
+
+	switch current := doc.Env["AWS_SDK_UA_APP_ID"]; {
+	case current == appID:
+		result.Detail = "AWS_SDK_UA_APP_ID=" + appID + ": o CloudTrail mostra app/" + appID + " nas chamadas do agente"
+	case current == "":
+		result.Detail = "não gravada: o CloudTrail não distingue o agente. rode iron init (ou ignore, se usou --no-aws-tag de propósito)"
+	default:
+		result.Detail = fmt.Sprintf("AWS_SDK_UA_APP_ID vale %q: o CloudTrail não vai mostrar app/%s", current, appID)
+	}
+	return result
 }
 
 // CheckTools falha se o config.yaml tem erro, se um caminho configurado não

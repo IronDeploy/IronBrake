@@ -189,3 +189,149 @@ func TestInstallHookRefusesUnexpectedFiles(t *testing.T) {
 		})
 	}
 }
+
+func TestSetEnv(t *testing.T) {
+	read := func(t *testing.T, path string) map[string]any {
+		t.Helper()
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(data, &doc); err != nil {
+			t.Fatalf("o arquivo ficou inválido: %v\n%s", err, data)
+		}
+		return doc
+	}
+
+	t.Run("arquivo novo", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), ".claude", "settings.json")
+		changed, current, err := SetEnv(path, "AWS_SDK_UA_APP_ID", "iron-claude")
+		if err != nil || !changed || current != "iron-claude" {
+			t.Fatalf("%v %q %v", changed, current, err)
+		}
+		env := read(t, path)["env"].(map[string]any)
+		if env["AWS_SDK_UA_APP_ID"] != "iron-claude" {
+			t.Errorf("env: %v", env)
+		}
+	})
+
+	t.Run("preserva o resto do arquivo e as outras variáveis", func(t *testing.T) {
+		path := newSettingsPath(t, `{"model":"opus","env":{"OUTRA":"x"},"permissions":{"deny":["Read(~/.ssh/**)"]}}`)
+		changed, _, err := SetEnv(path, "AWS_SDK_UA_APP_ID", "iron-claude")
+		if err != nil || !changed {
+			t.Fatalf("%v %v", changed, err)
+		}
+		doc := read(t, path)
+		env := doc["env"].(map[string]any)
+		if env["OUTRA"] != "x" || env["AWS_SDK_UA_APP_ID"] != "iron-claude" || doc["model"] != "opus" || doc["permissions"] == nil {
+			t.Errorf("o resto do arquivo mudou: %v", doc)
+		}
+	})
+
+	t.Run("idempotente", func(t *testing.T) {
+		path := newSettingsPath(t, `{}`)
+		SetEnv(path, "K", "v")
+		first, _ := os.ReadFile(path)
+		changed, current, err := SetEnv(path, "K", "v")
+		second, _ := os.ReadFile(path)
+		if err != nil || changed || current != "v" || string(first) != string(second) {
+			t.Errorf("segunda chamada: %v %q %v", changed, current, err)
+		}
+	})
+
+	t.Run("não sobrescreve valor da pessoa", func(t *testing.T) {
+		path := newSettingsPath(t, `{"env":{"AWS_SDK_UA_APP_ID":"meu-app"}}`)
+		before, _ := os.ReadFile(path)
+		changed, current, err := SetEnv(path, "AWS_SDK_UA_APP_ID", "iron-claude")
+		after, _ := os.ReadFile(path)
+		if err != nil || changed || current != "meu-app" || string(before) != string(after) {
+			t.Errorf("%v %q %v", changed, current, err)
+		}
+	})
+
+	t.Run("arquivo inválido ou env que não é objeto", func(t *testing.T) {
+		for _, content := range []string{`{"env": `, `{"env": 5}`, `[]`, `{"env": []}`} {
+			path := newSettingsPath(t, content)
+			if _, _, err := SetEnv(path, "K", "v"); err == nil {
+				t.Errorf("%q deveria dar erro", content)
+			}
+			if after, _ := os.ReadFile(path); string(after) != content {
+				t.Errorf("arquivo inválido não pode ser alterado: %q", after)
+			}
+		}
+	})
+}
+
+func TestInstallHookRecognizesTheSameProgramWithAnUncleanPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".claude", "settings.json")
+
+	if changed, err := InstallHook(path, "/opt/iron/bin/iron"); err != nil || !changed {
+		t.Fatalf("1ª instalação: %v %v", changed, err)
+	}
+	// O mesmo programa por um caminho com "..", ".", "//": não é um segundo hook.
+	for _, again := range []string{"/opt/iron/x/../bin/iron", "/opt/iron/./bin/iron", "/opt//iron/bin/iron"} {
+		changed, err := InstallHook(path, again)
+		if err != nil || changed {
+			t.Errorf("%s: não deveria instalar de novo (%v %v)", again, changed, err)
+		}
+	}
+
+	hooks, err := FindHooks(path)
+	if err != nil || len(hooks) != 1 {
+		t.Errorf("deveria haver um hook só: %v %v", hooks, err)
+	}
+
+	// Outro programa de verdade continua sendo outro hook.
+	if changed, _ := InstallHook(path, "/opt/outro/bin/iron"); !changed {
+		t.Error("um caminho diferente de verdade deve instalar")
+	}
+}
+
+func TestWriteFileAtomic(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	if err := writeFileAtomic(path, []byte("novo\n")); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0o644 {
+		t.Errorf("arquivo novo deve sair 0644: %v", info.Mode().Perm())
+	}
+
+	// Mantém a permissão que já existia.
+	os.Chmod(path, 0o600)
+	if err := writeFileAtomic(path, []byte("outro\n")); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
+		t.Errorf("deve manter 0600: %v", info.Mode().Perm())
+	}
+	if data, _ := os.ReadFile(path); string(data) != "outro\n" {
+		t.Errorf("conteúdo: %q", data)
+	}
+
+	// Não deixa temporários para trás, nem quando falha.
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Errorf("sobrou lixo na pasta: %v", entries)
+	}
+	if err := writeFileAtomic(filepath.Join(dir, "nao-existe", "x.json"), []byte("x")); err == nil {
+		t.Error("pasta inexistente deve dar erro")
+	}
+	if entries, _ = os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("falha não pode deixar temporário: %v", entries)
+	}
+}
+
+func TestSetEnvKeepsFilePermission(t *testing.T) {
+	path := newSettingsPath(t, `{}`)
+	os.Chmod(path, 0o600)
+
+	if _, _, err := SetEnv(path, "K", "v"); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
+		t.Errorf("a permissão do arquivo da pessoa deve ficar: %v", info.Mode().Perm())
+	}
+}

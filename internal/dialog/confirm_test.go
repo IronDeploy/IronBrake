@@ -3,6 +3,7 @@ package dialog
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestParseAnswer(t *testing.T) {
@@ -38,5 +39,19 @@ func TestParseAnswer(t *testing.T) {
 func TestConfirmUsesSystemOsascript(t *testing.T) {
 	if osascriptPath != "/usr/bin/osascript" {
 		t.Errorf("esperava /usr/bin/osascript, obtive %q", osascriptPath)
+	}
+}
+
+func TestConfirmWithinWithoutTimeIsUnavailable(t *testing.T) {
+	for _, wait := range []time.Duration{0, -time.Second, 500 * time.Millisecond} {
+		if got := ConfirmWithin("qualquer", wait); got != Unavailable {
+			t.Errorf("espera %v: esperava Unavailable (sem janela), obtive %v", wait, got)
+		}
+	}
+}
+
+func TestDefaultWaitMatchesClaudeBudget(t *testing.T) {
+	if DefaultWait != 480*time.Second {
+		t.Errorf("DefaultWait = %v", DefaultWait)
 	}
 }

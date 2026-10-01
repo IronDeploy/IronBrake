@@ -444,7 +444,7 @@ func TestRunInit(t *testing.T) {
 	t.Run("primeira vez instala", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 
-		code := runInit(dir, testExe, false, &stdout, &stderr)
+		code := runInit(dir, testExe, initOptions{}, &stdout, &stderr)
 
 		if code != 0 {
 			t.Fatalf("código de saída: esperava 0, obtive %d (stderr=%q)", code, stderr.String())
@@ -464,7 +464,7 @@ func TestRunInit(t *testing.T) {
 	t.Run("segunda vez avisa que já estava", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 
-		code := runInit(dir, testExe, false, &stdout, &stderr)
+		code := runInit(dir, testExe, initOptions{}, &stdout, &stderr)
 
 		if code != 0 {
 			t.Fatalf("código de saída: esperava 0, obtive %d (stderr=%q)", code, stderr.String())
@@ -480,7 +480,7 @@ func TestRunInitHardenWritesDenyRules(t *testing.T) {
 	settings := filepath.Join(dir, ".claude", "settings.json")
 	var stdout, stderr bytes.Buffer
 
-	code := runInit(dir, testExe, true, &stdout, &stderr)
+	code := runInit(dir, testExe, initOptions{harden: true}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("código de saída: esperava 0, obtive %d (stderr=%q)", code, stderr.String())
@@ -511,7 +511,7 @@ func TestRunInitInvalidSettingsFailsWithoutTouchingFile(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	code := runInit(dir, testExe, false, &stdout, &stderr)
+	code := runInit(dir, testExe, initOptions{}, &stdout, &stderr)
 
 	if code == 0 {
 		t.Error("esperava um código de saída diferente de 0")
@@ -1060,5 +1060,200 @@ func TestRunHookPassesPolicyAuditConfigToTheLog(t *testing.T) {
 
 	if want := (policy.AuditLog{MaxSizeMB: 20, Keep: 10}); gotCfg != want {
 		t.Errorf("o log deveria receber %+v, recebeu %+v", want, gotCfg)
+	}
+}
+
+func TestParseAgentFlag(t *testing.T) {
+	cases := []struct {
+		args    []string
+		want    string
+		wantErr bool
+	}{
+		{nil, "claude", false},
+		{[]string{"--agent=claude"}, "claude", false},
+		{[]string{"--agent", "Claude"}, "claude", false},
+		{[]string{"--agent=emacs"}, "", true},
+		{[]string{"--agent"}, "", true},
+		{[]string{"--outra"}, "", true},
+	}
+	for _, c := range cases {
+		a, err := parseAgentFlag(c.args)
+		if (err != nil) != c.wantErr || (err == nil && a.Name() != c.want) {
+			t.Errorf("parseAgentFlag(%v) = %v, %v", c.args, a, err)
+		}
+	}
+}
+
+func TestRunHookUnknownAgentExits2(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"hook", "--agent=emacs"}, strings.NewReader("{}"), &stdout, &stderr); code != 2 {
+		t.Errorf("esperava 2, obtive %d (%s)", code, stderr.String())
+	}
+}
+
+// noAskAgent é o Claude com a capacidade de perguntar desligada: simula Codex,
+// Kiro e os outros agentes que não entendem "ask".
+type noAskAgent struct{ hook.Agent }
+
+func (noAskAgent) Name() string { return "sem-ask" }
+
+func (a noAskAgent) Capabilities() hook.Capabilities {
+	c := a.Agent.Capabilities()
+	c.CanAsk = false
+	return c
+}
+
+func newNoAskAgent() hook.Agent { return noAskAgent{hook.Claude} }
+
+func TestRunHookAskBecomesDenyWhenAgentCannotAsk(t *testing.T) {
+	cases := []struct {
+		name     string
+		answer   dialog.Answer
+		wantCode int
+		wantOut  string // trecho esperado no stdout (allow explícito)
+		wantErr  string // trecho esperado no stderr (deny)
+	}{
+		// Sem janela e sem ask: deny, nunca allow.
+		{"janela indisponível", dialog.Unavailable, 2, "", "não sabe perguntar"},
+		{"recusado na janela", dialog.Rejected, 2, "", "recusou"},
+		// A janela resolve sozinha, sem depender do ask do agente.
+		{"aprovado na janela", dialog.Approved, 0, `"permissionDecision":"allow"`, ""},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			d := &fakeDialog{answer: c.answer}
+			log := &fakeAudit{}
+			deps := testDeps()
+			deps.confirm, deps.audit, deps.agent = d.confirm, log.append, newNoAskAgent()
+			var stdout, stderr bytes.Buffer
+
+			code := runHook(strings.NewReader(auditEvent("git push --force-with-lease")), &stdout, &stderr, deps)
+
+			if code != c.wantCode {
+				t.Errorf("código de saída: esperava %d, obtive %d", c.wantCode, code)
+			}
+			if !strings.Contains(stdout.String(), c.wantOut) || (c.wantOut == "" && stdout.Len() != 0) {
+				t.Errorf("stdout: esperava %q, obtive %q", c.wantOut, stdout.String())
+			}
+			if !strings.Contains(stderr.String(), c.wantErr) {
+				t.Errorf("stderr: esperava conter %q, obtive %q", c.wantErr, stderr.String())
+			}
+			if len(log.entries) != 1 || log.entries[0].Agent != "sem-ask" {
+				t.Errorf("o log deveria registrar o agente, obtive %+v", log.entries)
+			}
+		})
+	}
+}
+
+func TestRunHookClaudeStillAsks(t *testing.T) {
+	deps := testDeps()
+	var stdout, stderr bytes.Buffer
+
+	code := runHook(strings.NewReader(auditEvent("git push --force-with-lease")), &stdout, &stderr, deps)
+
+	if code != 0 || !strings.Contains(stdout.String(), `"permissionDecision":"ask"`) {
+		t.Errorf("o Claude entende ask: esperava ask com saída 0, obtive %d %q", code, stdout.String())
+	}
+}
+
+func TestRunHookAuditsAgentName(t *testing.T) {
+	log := &fakeAudit{}
+	deps := testDeps()
+	deps.audit = log.append
+	var stdout, stderr bytes.Buffer
+
+	runHook(strings.NewReader(auditEvent("git status")), &stdout, &stderr, deps)
+	runHook(strings.NewReader(`{`), &stdout, &stderr, deps)
+
+	if len(log.entries) != 2 || log.entries[0].Agent != "claude" || log.entries[1].Agent != "claude" {
+		t.Errorf("esperava o agente claude nas duas entradas, obtive %+v", log.entries)
+	}
+}
+
+func TestRunInitWritesAWSTag(t *testing.T) {
+	t.Run("grava a etiqueta e preserva o hook", func(t *testing.T) {
+		dir := t.TempDir()
+		var stdout, stderr bytes.Buffer
+
+		code := runInit(dir, testExe, initOptions{awsTag: true}, &stdout, &stderr)
+
+		if code != 0 || !strings.Contains(stdout.String(), "AWS_SDK_UA_APP_ID=iron-claude") || stderr.Len() != 0 {
+			t.Fatalf("%d %q %q", code, stdout.String(), stderr.String())
+		}
+		data, _ := os.ReadFile(setup.SettingsPath(dir))
+		if !strings.Contains(string(data), `"AWS_SDK_UA_APP_ID": "iron-claude"`) || !strings.Contains(string(data), "PreToolUse") {
+			t.Errorf("settings: %s", data)
+		}
+		if hooks, err := setup.FindHooks(setup.SettingsPath(dir)); err != nil || len(hooks) != 1 {
+			t.Errorf("o hook deve continuar achável: %v %v", hooks, err)
+		}
+	})
+
+	t.Run("segunda vez diz que já estava", func(t *testing.T) {
+		dir := t.TempDir()
+		var stdout, stderr bytes.Buffer
+		runInit(dir, testExe, initOptions{awsTag: true}, &stdout, &stderr)
+		stdout.Reset()
+
+		runInit(dir, testExe, initOptions{awsTag: true}, &stdout, &stderr)
+
+		if !strings.Contains(stdout.String(), "já estava gravada") {
+			t.Errorf("%q", stdout.String())
+		}
+	})
+
+	t.Run("não sobrescreve o valor da pessoa", func(t *testing.T) {
+		dir := t.TempDir()
+		path := setup.SettingsPath(dir)
+		os.MkdirAll(filepath.Dir(path), 0o755)
+		os.WriteFile(path, []byte(`{"env":{"AWS_SDK_UA_APP_ID":"meu-app"}}`), 0o644)
+		var stdout, stderr bytes.Buffer
+
+		code := runInit(dir, testExe, initOptions{awsTag: true}, &stdout, &stderr)
+
+		data, _ := os.ReadFile(path)
+		if code != 0 || !strings.Contains(string(data), "meu-app") || strings.Contains(string(data), "iron-claude") {
+			t.Errorf("o valor da pessoa deve ficar: %s", data)
+		}
+		if !strings.Contains(stdout.String(), `já vale "meu-app"`) {
+			t.Errorf("deveria avisar do conflito: %q", stdout.String())
+		}
+	})
+
+	t.Run("sem a opção não grava", func(t *testing.T) {
+		dir := t.TempDir()
+		var stdout, stderr bytes.Buffer
+		runInit(dir, testExe, initOptions{}, &stdout, &stderr)
+		data, _ := os.ReadFile(setup.SettingsPath(dir))
+		if strings.Contains(string(data), "AWS_SDK_UA_APP_ID") || strings.Contains(stdout.String(), "etiqueta") {
+			t.Errorf("não era para gravar: %s %q", data, stdout.String())
+		}
+	})
+
+	t.Run("env inválido vira aviso e o hook é instalado", func(t *testing.T) {
+		dir := t.TempDir()
+		path := setup.SettingsPath(dir)
+		os.MkdirAll(filepath.Dir(path), 0o755)
+		os.WriteFile(path, []byte(`{"env": 5}`), 0o644)
+		var stdout, stderr bytes.Buffer
+
+		code := runInit(dir, testExe, initOptions{awsTag: true}, &stdout, &stderr)
+
+		if code != 0 || !strings.Contains(stderr.String(), "aviso") {
+			t.Errorf("%d %q", code, stderr.String())
+		}
+	})
+}
+
+func TestAWSAlertsPrintsTheTemplate(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"aws-alerts"}, strings.NewReader(""), &stdout, &stderr)
+
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("%d %q", code, stderr.String())
+	}
+	if !strings.HasPrefix(stdout.String(), "AWSTemplateFormatVersion") || !strings.Contains(stdout.String(), "AWS API Call via CloudTrail") {
+		t.Errorf("saída: %.80q", stdout.String())
 	}
 }

@@ -1,7 +1,6 @@
 package hook
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,21 +23,25 @@ func TestReadSampleEvents(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {
 			path := filepath.Join("..", "..", "testdata", "events", c.file)
-			data, err := os.ReadFile(path)
+			file, err := os.Open(path)
 			if err != nil {
 				t.Fatalf("erro lendo %s: %v", path, err)
 			}
+			defer file.Close()
 
-			var event PreToolUseEvent
-			if err := json.Unmarshal(data, &event); err != nil {
+			event, err := Claude.ParseEvent(file)
+			if err != nil {
 				t.Fatalf("erro decodificando JSON: %v", err)
 			}
 
-			if event.ToolName != c.toolName {
-				t.Errorf("ToolName: esperava %q, obtive %q", c.toolName, event.ToolName)
+			if event.Tool != c.toolName {
+				t.Errorf("Tool: esperava %q, obtive %q", c.toolName, event.Tool)
 			}
-			if event.ToolInput.Command != c.command {
-				t.Errorf("ToolInput.Command: esperava %q, obtive %q", c.command, event.ToolInput.Command)
+			if event.Command != c.command {
+				t.Errorf("Command: esperava %q, obtive %q", c.command, event.Command)
+			}
+			if event.Shell != (c.toolName == "Bash") {
+				t.Errorf("Shell: obtive %v para a ferramenta %q", event.Shell, c.toolName)
 			}
 		})
 	}
