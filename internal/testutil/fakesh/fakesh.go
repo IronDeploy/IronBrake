@@ -42,10 +42,11 @@ func Install(t testing.TB, path, script string) string {
 	}
 	path += ".exe"
 	_ = os.Remove(path)
-	if err := os.Link(exe, path); err != nil {
-		if err := copyFile(exe, path); err != nil {
-			t.Fatal(err)
-		}
+	// Cópia, nunca hard link: o link compartilha o arquivo com o binário de
+	// teste em execução, e o Windows não deixa apagar um executável em uso
+	// (os testes de "binário ausente" removem o programa falso).
+	if err := copyFile(exe, path); err != nil {
+		t.Fatal(err)
 	}
 	if err := os.WriteFile(path+sidecarExt, []byte(script), 0o644); err != nil {
 		t.Fatal(err)
