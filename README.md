@@ -187,6 +187,14 @@ normal ou pede que você mesmo rode o comando).
 | Kiro CLI v3 com `--no-interactive` | | **não suportado**: o Kiro não executa hooks nesse modo |
 | Kiro IDE | | **não suportado**: o hook do IDE não recebe o comando |
 
+**Instalar em mais de um agente.** `iron init` sem opções instala o hook do Claude Code (como sempre) e, se achar outros agentes
+nesta máquina (a pasta `~/.kiro`, `~/.gemini/antigravity-cli` ou `~/.codex`, ou o programa no PATH), **pergunta um por um**
+quando está num terminal e, sem terminal, só mostra o comando. `iron init --agent=kiro,codex` instala nos agentes listados
+(`claude`, `kiro`, `antigravity` ou `agy`, `codex`) e `iron init --agent=all` em todos os detectados; o `--harden` vale só para o Claude.
+`iron status` mostra, por agente, se o hook está instalado nesta pasta, com que versão ele foi verificado, a última decisão
+registrada e os avisos (hook não confiado no Codex, `hooks.json` inválido no Antigravity, programa que não existe...), sem executar
+o hook nem gravar no log. Para testar de verdade, rode `iron doctor --agent=NOME`.
+
 No Kiro, o `iron init` grava o hook nos dois formatos: dentro do agente (`.kiro/agents/`, o v2 só
 lê assim) e em `.kiro/hooks/iron-brake.json` (o v3). Se a pasta não tem `kiro_default.json`, ele
 cria um mínimo, que **substitui o agente padrão do Kiro nessa pasta** (sem o prompt longo dele); agentes

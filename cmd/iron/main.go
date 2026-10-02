@@ -42,12 +42,14 @@ const doctorTimeout = 5 * time.Second
 const usage = `uso: iron <subcomando>
 
   hook          roda como hook de pré-execução do agente (lê o evento pelo stdin; --agent=claude)
-  init          instala o hook em .claude/settings.json da pasta atual e a etiqueta do agente na AWS
+  init          instala o hook em .claude/settings.json da pasta atual e a etiqueta do agente na AWS; se achar outros agentes, pergunta
+  init --agent=a,b  instala nos agentes listados (claude, kiro, antigravity, codex); --agent=all instala em todos os detectados
   init --agent=kiro  instala o hook do Kiro CLI (.kiro/agents e .kiro/hooks) na pasta atual
   init --agent=antigravity  instala o hook do Antigravity CLI (.agents/hooks.json) na pasta atual (apelido: agy)
   init --agent=codex  instala o hook do Codex CLI (.codex/hooks.json) na pasta atual; você ainda confia nele no Codex (/hooks)
   init --no-aws-tag  instala só o hook, sem gravar AWS_SDK_UA_APP_ID no env do agente
   init --harden grava também regras deny de leitura das credenciais (Iron Shield)
+  status        mostra, por agente, o que está instalado nesta pasta, o que foi verificado e os avisos (não executa o hook)
   doctor        verifica se o hook desta pasta está mesmo protegendo (--agent=kiro, antigravity ou codex)
   scan          raio-X das credenciais ao alcance do agente (Iron Shield, só leitura)
   scan --manage igual, mas interativo: setas navegam, enter oculta/mostra, esc/q sai
@@ -80,7 +82,9 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			deadline: budget.Deadline, agent: agent,
 		})
 	case "init":
-		return initHere(args[1:], stdout, stderr)
+		return initHere(args[1:], stdin, stdout, stderr)
+	case "status":
+		return statusHere(stdout, stderr)
 	case "doctor":
 		return doctorHere(args[1:], stdout, stderr)
 	case "scan":
@@ -387,37 +391,6 @@ func runAudit(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "iron: não consegui verificar %s: %s.\n", log.Path, r.Reason)
 		return 1
 	}
-}
-
-func initHere(args []string, stdout, stderr io.Writer) int {
-	agent, err := initAgent(args)
-	if err != nil {
-		fmt.Fprintf(stderr, "iron: %v\n", err)
-		return 2
-	}
-	opts := initOptions{harden: slices.Contains(args, "--harden"), awsTag: !slices.Contains(args, "--no-aws-tag")}
-	dir, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "iron: %v\n", err)
-		return 1
-	}
-	exePath, err := os.Executable()
-	if err != nil {
-		fmt.Fprintf(stderr, "iron: %v\n", err)
-		return 1
-	}
-	// os.Executable() não normaliza: "../bin/iron" vira ".../a/../bin/iron", e o
-	// hook ficaria gravado com esse caminho.
-	exePath = filepath.Clean(exePath)
-	switch agent.Name() {
-	case hook.Kiro.Name():
-		return runInitKiro(dir, exePath, opts, stdout, stderr)
-	case hook.Antigravity.Name():
-		return runInitAntigravity(dir, exePath, opts, stdout, stderr)
-	case hook.Codex.Name():
-		return runInitCodex(dir, exePath, opts, stdout, stderr)
-	}
-	return runInit(dir, exePath, opts, stdout, stderr)
 }
 
 // initAgent lê "--agent=NOME" do "iron init"; sem a opção, vale o padrão.

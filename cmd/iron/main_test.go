@@ -769,6 +769,7 @@ func TestRunDispatch(t *testing.T) {
 	})
 
 	t.Run("hook chega na lógica do hook", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir()) // o hook de verdade grava no log de auditoria do usuário
 		var stdout, stderr bytes.Buffer
 
 		code := run([]string{"hook"}, openEvent(t, "git-push-force.json"), &stdout, &stderr)

@@ -480,3 +480,18 @@ verdade não foi rodado em Linux**. Não verificado: Windows, outras versões e 
 - **Fora do escopo:** `--harden` (usa regras de permissão do Claude) e `iron watch` (o transcript, `rollout-*.jsonl`, mostra o comando como JavaScript
   dentro de um `custom_tool_call`; extrair dele seria frágil).
 
+## 22. Limites da detecção de agentes e do iron status
+
+- **Detecção** (`iron init`, `iron status`): a pasta do agente em `~/` (`.claude`, `.kiro`, `.gemini/antigravity-cli`, `.codex` ou o `CODEX_HOME`) ou o programa
+  no PATH (`claude`, `kiro-cli`, `agy`, `codex`). É um indício de que o agente existe, não de que funciona; a pasta `~/.gemini` sozinha (Gemini CLI antigo) não conta como
+  Antigravity. Um agente que o Iron Brake não conhece não é detectado.
+- **`iron init` sem `--agent`** pergunta por cada outro agente detectado e ainda não instalado na pasta, **só num terminal de verdade** (`/dev/null` e pipe contam como sem
+  terminal e só mostram o comando). Verificado num terminal real (tmux) e em Linux; a resposta em branco é "não". Se um instalador falhar, os outros continuam e o código
+  de saída é o maior.
+- **`iron status` só lê arquivos.** Não executa o hook, não grava no log, e **não vê** o que o agente faz de fato: "instalado" quer dizer que o arquivo de configuração tem o
+  hook do Iron Brake nesta pasta. No Codex ele confere a confiança pela presença no `config.toml` (o hash não é recalculado); hook de projeto não confiado conta como
+  "NÃO PROTEGE". A "última decisão" vem dos últimos 30 dias do log e não diferencia pastas (o log é do usuário, não do projeto). As versões mostradas em "verificado com"
+  são as versões em que cada agente foi testado, não a que está instalada aqui.
+- **Testes e o log real:** os testes do `cmd/iron` que chamam `run(["hook", ...])` gravavam no `~/.iron/audit.log` real de quem rodava a suíte; passaram a usar um `HOME`
+  temporário (as entradas antigas continuam no log, que é encadeado por hash e não se edita).
+
