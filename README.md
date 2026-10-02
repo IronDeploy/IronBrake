@@ -1,7 +1,7 @@
 # Iron Brake
 
 O Iron Brake é um freio para agentes de IA no terminal. Ele roda como hook do
-agente (Claude Code, Kiro CLI ou Antigravity CLI) e analisa cada comando **antes** de ele executar: libera o que é
+agente (Claude Code, Kiro CLI, Antigravity CLI ou Codex CLI) e analisa cada comando **antes** de ele executar: libera o que é
 seguro, pede sua confirmação para o que é arriscado e bloqueia o que destrói.
 
 ## Instalação (macOS e Linux)
@@ -183,6 +183,7 @@ normal ou pede que você mesmo rode o comando).
 | Claude Code | `iron init` | suportado |
 | Kiro CLI (engines v2 e v3, uso interativo e v2 não interativo) | `iron init --agent=kiro` e `iron doctor --agent=kiro` | suportado, verificado com o Kiro CLI 2.26.1 em 2026-10-01 |
 | Antigravity CLI (`agy`), uso interativo e `-p` | `iron init --agent=antigravity` e `iron doctor --agent=antigravity` | suportado, verificado com o Antigravity CLI 1.2.14 em 2026-10-01 |
+| Codex CLI, chat e `codex exec` | `iron init --agent=codex` e `iron doctor --agent=codex` | suportado, verificado com o Codex CLI 0.159.3 em 2026-10-01, **depois de você confiar no hook** (veja abaixo) |
 | Kiro CLI v3 com `--no-interactive` | | **não suportado**: o Kiro não executa hooks nesse modo |
 | Kiro IDE | | **não suportado**: o hook do IDE não recebe o comando |
 

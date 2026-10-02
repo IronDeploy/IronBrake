@@ -45,9 +45,10 @@ const usage = `uso: iron <subcomando>
   init          instala o hook em .claude/settings.json da pasta atual e a etiqueta do agente na AWS
   init --agent=kiro  instala o hook do Kiro CLI (.kiro/agents e .kiro/hooks) na pasta atual
   init --agent=antigravity  instala o hook do Antigravity CLI (.agents/hooks.json) na pasta atual (apelido: agy)
+  init --agent=codex  instala o hook do Codex CLI (.codex/hooks.json) na pasta atual; você ainda confia nele no Codex (/hooks)
   init --no-aws-tag  instala só o hook, sem gravar AWS_SDK_UA_APP_ID no env do agente
   init --harden grava também regras deny de leitura das credenciais (Iron Shield)
-  doctor        verifica se o hook desta pasta está mesmo protegendo (--agent=kiro ou --agent=antigravity)
+  doctor        verifica se o hook desta pasta está mesmo protegendo (--agent=kiro, antigravity ou codex)
   scan          raio-X das credenciais ao alcance do agente (Iron Shield, só leitura)
   scan --manage igual, mas interativo: setas navegam, enter oculta/mostra, esc/q sai
   shield status mostra quais credenciais estão travadas e quais não estão
@@ -413,6 +414,8 @@ func initHere(args []string, stdout, stderr io.Writer) int {
 		return runInitKiro(dir, exePath, opts, stdout, stderr)
 	case hook.Antigravity.Name():
 		return runInitAntigravity(dir, exePath, opts, stdout, stderr)
+	case hook.Codex.Name():
+		return runInitCodex(dir, exePath, opts, stdout, stderr)
 	}
 	return runInit(dir, exePath, opts, stdout, stderr)
 }
@@ -428,6 +431,60 @@ func initAgent(args []string) (hook.Agent, error) {
 		}
 	}
 	return hook.Lookup(name)
+}
+
+// runInitCodex instala o hook do Codex CLI (.codex/hooks.json) e a etiqueta da
+// AWS (.codex/config.toml do projeto). O Codex só roda o hook depois de a pasta
+// e o hook estarem confiados, o que a pessoa faz no próprio Codex.
+func runInitCodex(dir, exePath string, opts initOptions, stdout, stderr io.Writer) int {
+	if opts.harden {
+		fmt.Fprintln(stderr, "iron: --harden só vale para o Claude Code (usa regras de permissão dele)")
+		return 2
+	}
+	state, err := setup.InstallCodex(dir, exePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "iron: %v\n", err)
+		return 1
+	}
+	path := setup.CodexHooksPath(dir)
+	switch state {
+	case setup.Installed:
+		fmt.Fprintf(stdout, "iron: hook do Codex instalado em %s\n", path)
+	case setup.Updated:
+		fmt.Fprintf(stdout, "iron: hook do Codex atualizado em %s (caminho, matcher ou prazo estavam diferentes)\n", path)
+	default:
+		fmt.Fprintf(stdout, "iron: o hook do Codex já estava em %s\n", path)
+	}
+	if state != setup.Already {
+		fmt.Fprintln(stdout, "iron: ATENÇÃO: o Codex NÃO roda este hook até você confiar nele, e o codex exec não avisa. Abra o codex nesta pasta, confie na pasta e escolha")
+		fmt.Fprintln(stdout, "      \"Review hooks\" e confie no hook (tecla t), ou use /hooks. Depois abra uma sessão nova. Confira com: iron doctor --agent=codex")
+	}
+	if opts.awsTag {
+		reportCodexAWSTag(dir, stdout, stderr)
+	}
+	if !setup.IsIronBinaryName(exePath) {
+		fmt.Fprintf(stderr, "iron: aviso: o programa se chama %q; o hook funciona, mas o iron doctor só o reconhece se o arquivo se chamar iron (ou iron.exe).\n", filepath.Base(exePath))
+	}
+	return 0
+}
+
+// reportCodexAWSTag grava a etiqueta do agente nos comandos do Codex e diz o que fez.
+func reportCodexAWSTag(dir string, stdout, stderr io.Writer) {
+	appID := hook.Codex.Capabilities().AppID
+	state, err := setup.EnsureCodexAWSTag(dir, appID)
+	path := setup.CodexConfigPath(dir)
+	switch {
+	case err != nil:
+		fmt.Fprintf(stderr, "iron: aviso: não consegui gravar a etiqueta da AWS em %s: %v\n", path, err)
+	case state == setup.TagCreated:
+		fmt.Fprintf(stdout, "iron: etiqueta da AWS (%s=%s) gravada em %s; os comandos do Codex a herdam\n", awsTagVar, appID, path)
+	case state == setup.TagAlready:
+		fmt.Fprintf(stdout, "iron: a etiqueta da AWS já estava em %s\n", path)
+	case state == setup.TagDifferent:
+		fmt.Fprintf(stdout, "iron: %s já define %s com outro valor; não mexi (o CloudTrail não vai mostrar app/%s)\n", path, awsTagVar, appID)
+	default:
+		fmt.Fprintf(stdout, "iron: %s já existe; acrescente isto para a etiqueta da AWS:\n%s", path, setup.CodexTagSnippet(appID))
+	}
 }
 
 // runInitAntigravity instala o hook do Antigravity CLI (.agents/hooks.json). O
@@ -750,6 +807,8 @@ func doctorHere(args []string, stdout, stderr io.Writer) int {
 		return runDoctorKiro(dir, stdout)
 	case hook.Antigravity.Name():
 		return runDoctorAntigravity(dir, stdout)
+	case hook.Codex.Name():
+		return runDoctorCodex(dir, stdout)
 	}
 	if _, err := os.Stat(setup.SettingsPath(dir)); err != nil {
 		if _, kiroErr := os.Stat(filepath.Join(dir, ".kiro")); kiroErr == nil {
@@ -757,6 +816,31 @@ func doctorHere(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	return runDoctor(dir, stdout)
+}
+
+// codexConfigPath é o config.toml do usuário (CODEX_HOME, ou ~/.codex).
+func codexConfigPath() string {
+	if home := os.Getenv("CODEX_HOME"); home != "" {
+		return filepath.Join(home, "config.toml")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".codex", "config.toml")
+	}
+	return ""
+}
+
+func runDoctorCodex(dir string, stdout io.Writer) int {
+	extra := doctor.Extra{
+		Log:        audit.Log{Path: audit.DefaultPath()},
+		ConfigPath: toolpath.ConfigPath(),
+		ProjectDir: dir,
+	}
+	results := doctor.RunCodex(dir, codexConfigPath(), version, doctorTimeout, extra)
+	doctor.Print(stdout, results)
+	if !doctor.AllOK(results) {
+		return 1
+	}
+	return 0
 }
 
 func runDoctorAntigravity(dir string, stdout io.Writer) int {

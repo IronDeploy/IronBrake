@@ -34,6 +34,11 @@ type Capabilities struct {
 	// os agentes liberam o comando.
 	Timeout time.Duration
 
+	// DialogCap, se não for zero, limita quanto a janela espera pelo clique,
+	// mesmo que o Timeout permita mais (o Codex abandona e refaz a chamada se o
+	// hook demora demais no "codex exec").
+	DialogCap time.Duration
+
 	// AppID é a etiqueta que o "iron init" põe em AWS_SDK_UA_APP_ID no ambiente do
 	// agente: o SDK da AWS a acrescenta ao user agent (app/<AppID>), e o
 	// CloudTrail a registra em cada chamada de API. Vazio: o agente não tem como
@@ -70,13 +75,16 @@ func (c Capabilities) Budget() Budget {
 	if wait < minDialogWait {
 		wait = 0
 	}
+	if c.DialogCap > 0 && wait > c.DialogCap {
+		wait = c.DialogCap
+	}
 	return Budget{Deadline: deadline, DialogWait: wait}
 }
 
 // DefaultAgent é o agente de "iron hook" sem --agent.
 const DefaultAgent = "claude"
 
-var agents = []Agent{Claude, Kiro, Antigravity}
+var agents = []Agent{Claude, Kiro, Antigravity, Codex}
 
 // agentAliases são nomes alternativos aceitos em --agent.
 var agentAliases = map[string]string{"agy": "antigravity"}

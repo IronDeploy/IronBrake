@@ -441,3 +441,38 @@ e a cobertura do doctor (sem lacuna com o hook ativo, uma lacuna acusada com o h
 - **Gemini CLI:** o Homebrew o marca como sem suporte do projeto (desativado em 2026-12-18) e indica o Antigravity. O Gemini CLI não
   foi integrado.
 
+## 21. Limites do Codex CLI
+
+Verificado com o Codex CLI **0.159.3** (macOS), em 2026-10-01, com o agente real e o `iron` real: bloqueio de `git push --force` e liberação de
+`git status` no `codex exec` e no chat; hook de 600 s; `agent: codex` no log; `iron doctor --agent=codex` (falha sem a confiança, passa com ela);
+a etiqueta da AWS nos comandos. Em **Linux** (Docker, usuário não root) foi verificado o binário `iron` real com o payload capturado; o **Codex de
+verdade não foi rodado em Linux**. Não verificado: Windows, outras versões, outros modelos, e a janela de confirmação (ver abaixo).
+
+- **O Codex LIBERA o comando quando o hook falha.** Só bloqueiam o exit 2 (com o motivo no stderr, que o modelo recebe) e o JSON
+  `hookSpecificOutput.permissionDecision: "deny"` (ou `{"decision":"block"}`). Exit 1, stdout que não é JSON, `{}`, `{"decision":"deny"}`,
+  prazo estourado, e `ask`/`allow` em JSON ("unsupported permissionDecision") deixam o comando **executar**. Por isso o Iron Brake responde só
+  com exit 2 e nunca com `ask`.
+- **Hook não confiado não roda, em silêncio.** O Codex exige confiar na pasta (`[projects."<pasta>"] trust_level = "trusted"`) e no hook por hash
+  (`[hooks.state."<hooks.json>:pre_tool_use:<grupo>:<handler>"] trusted_hash`), ambos no `~/.codex/config.toml`. **Provado:** com o hook instalado
+  e não confiado, o `codex exec` deixou um force push executar, sem nenhuma mensagem e com 0 entradas no log. Alterar o hook (caminho, matcher,
+  prazo) volta a exigir a confiança ("Modified since last trusted"). O doctor confere a presença das duas confianças e avisa quando o
+  `hooks.json` é mais novo que a última gravação do `config.toml`; **não recalcula o hash** (o algoritmo não foi descoberto), então um hook
+  alterado depois da confiança pode passar despercebido se o `config.toml` tiver sido gravado depois por outro motivo.
+- **Os hooks carregam no início da sessão.** Confiar no meio de uma sessão só vale para as próximas. O chat usa um daemon compartilhado
+  (`codex app-server daemon`); numa sessão nova ainda apareceu "hooks disabled until the project is trusted" até eu reiniciar o daemon
+  (`codex app-server daemon restart`). O hook do chat roda no ambiente do **daemon**, não no do seu terminal.
+- **Prazo e janela.** O `timeout` do hook é em segundos, padrão 600; o `iron init` grava 600. Estourado, o Codex mata o hook e **libera**. No
+  chat o Codex espera um hook de 100 s sem problema; no `codex exec` uma chamada com hook acima de ~55 s é **abandonada e refeita** (intermitente:
+  um segundo hook começa e o original fica órfão). Por isso a janela do Iron Brake espera no máximo **45 s** no Codex (`Capabilities.DialogCap`).
+- **Só o shell é coberto.** O hook recebe `tool_name: "Bash"` com o comando em `tool_input.command`. O `apply_patch` também chega com o texto do
+  patch em `tool_input.command` e **não** é analisado (o matcher é `^Bash$`; um patch com o texto `git push --force` não bloqueia). MCP e outras
+  ferramentas não são cobertos. Nos testes o modelo rodou comandos por um `custom_tool_call` "exec" que chama `tools.exec_command`, e o hook ainda viu
+  `Bash`; o nome `exec_command` da documentação nunca apareceu como `tool_name`, e outros modelos podem usar outro caminho (não verificado).
+- **`permission_mode`** é `default` no chat e `bypassPermissions` no `codex exec` (aprovação "never"). Não há variável com a raiz do projeto: vale o `cwd`.
+- **Etiqueta da AWS:** `[shell_environment_policy] set = { AWS_SDK_UA_APP_ID = "iron-codex" }` num `.codex/config.toml` **do projeto** chega aos comandos
+  no `exec` e no chat (verificado). O `iron init` só cria o arquivo; se ele já existe, mostra o trecho a acrescentar (não há leitor de TOML). Não
+  verificado com chamadas reais à AWS.
+- **`--dangerously-bypass-hook-trust`** roda hooks sem a confiança persistida; não é usado pelo Iron Brake.
+- **Fora do escopo:** `--harden` (usa regras de permissão do Claude) e `iron watch` (o transcript, `rollout-*.jsonl`, mostra o comando como JavaScript
+  dentro de um `custom_tool_call`; extrair dele seria frágil).
+
