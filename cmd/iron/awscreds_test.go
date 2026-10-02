@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -518,6 +519,9 @@ func TestHumanDuration(t *testing.T) {
 }
 
 func TestRunCredentialCommandReal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("o comando de credenciais do teste é um script /bin/sh")
+	}
 	dir := t.TempDir()
 	script := filepath.Join(dir, "creds.sh")
 	os.WriteFile(script, []byte("#!/bin/sh\necho 'aviso de login' >&2\nprintf '%s' '"+goodCreds+"'\n"), 0o755)
