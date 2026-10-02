@@ -138,7 +138,7 @@ func CheckCoverage(c Coverage) Result {
 		result.Detail = fmt.Sprintf("%d comando(s) de shell desde %s, todos com decisão do Iron Brake", checked, c.Since.Local().Format("02/01 15:04"))
 	default:
 		result.Detail = fmt.Sprintf("%d de %d comando(s) de shell desde %s rodaram SEM decisão do Iron Brake", len(gaps), checked, c.Since.Local().Format("02/01 15:04"))
-		result.Fix = "o hook não está disparando para esse agente. Se instalou o hook com o agente aberto, reinicie a sessão; senão, confira a configuração do agente (no Claude Code, /hooks). Rode iron watch --once (com --agent=antigravity para o Antigravity) para ver quais."
+		result.Fix = "o hook não está disparando para esse agente. Se instalou o hook com o agente aberto, reinicie a sessão; senão, confira a configuração do agente (no Claude Code, /hooks). Rode iron watch --once (com --agent=NOME para os agentes que não são o Claude Code) para ver quais."
 	}
 	return result
 }

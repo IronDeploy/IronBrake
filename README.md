@@ -81,17 +81,20 @@ etiqueta do agente na AWS está gravada.
 ## Conferir de fora com `iron watch`
 
 O hook decide antes do comando, mas não sabe se **deixou de rodar** (agente que o
-ignora, configuração errada, ou um modo do agente em que ele não carrega). O
-`iron watch` lê o transcript do Claude Code e o log de auditoria e avisa quando um
+ignora, configuração errada, ou um modo do agente em que ele não carrega, como o
+Kiro v3 com `--no-interactive` ou um hook do Codex ainda não confiado). O
+`iron watch` lê o transcript do agente e o log de auditoria e avisa quando um
 comando rodou **sem nenhuma decisão** do Iron Brake:
 
 ```bash
 iron watch             # acompanha esta pasta e avisa na hora (--notify para notificação)
 iron watch --once      # confere a última hora e sai com código 1 se houver lacuna
+iron watch --agent=codex --once   # também: antigravity, kiro (o padrão é claude)
 ```
 
-Só observa (não bloqueia) e, por ora, só lê o Claude Code. Detalhes e limites em
-[doc/watch.md](doc/watch.md).
+Só observa (não bloqueia). Lê os transcripts do Claude Code, do Kiro CLI, do Antigravity CLI e do Codex CLI
+(os três últimos guardam as sessões de todos os projetos numa pasta só: o `iron watch` confere só os comandos desta pasta).
+O `iron doctor --agent=NOME` inclui o mesmo cruzamento. Detalhes e limites em [doc/watch.md](doc/watch.md).
 
 ## Portão de credenciais da AWS
 

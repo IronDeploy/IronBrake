@@ -46,12 +46,12 @@ func TestParseWatchArgsAgent(t *testing.T) {
 	if def, _ := parseWatchArgs(nil); def.agent != "claude" {
 		t.Errorf("o padrão é claude: %q", def.agent)
 	}
-	for _, args := range [][]string{{"--agent", "antigravity"}, {"--agent=agy"}} {
-		if got, err := parseWatchArgs(args); err != nil || got.agent != "antigravity" {
+	for args, want := range map[string]string{"--agent=antigravity": "antigravity", "--agent=agy": "antigravity", "--agent=kiro": "kiro", "--agent=CODEX": "codex", "--agent=claude": "claude"} {
+		if got, err := parseWatchArgs([]string{args}); err != nil || got.agent != want {
 			t.Errorf("%v: %+v %v", args, got, err)
 		}
 	}
-	for _, bad := range [][]string{{"--agent", "kiro"}, {"--agent=emacs"}, {"--agent"}} {
+	for _, bad := range [][]string{{"--agent=emacs"}, {"--agent"}} {
 		if _, err := parseWatchArgs(bad); err == nil {
 			t.Errorf("%v deveria dar erro", bad)
 		}

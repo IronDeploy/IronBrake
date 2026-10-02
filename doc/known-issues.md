@@ -396,8 +396,8 @@ dois payloads, `ask` sem janela virando bloqueio e corrente do log íntegra; o *
   compila como regex e o v3 descarta o hook sem avisar. `execute_cmd` (Windows) só consta na documentação.
 - **Sem variável com a raiz do projeto:** vale o `cwd` do stdin. O `tool_input.cwd` do v3 é ignorado de
   propósito (quem o preenche é o modelo).
-- **Fora do escopo:** `--harden` (o Iron Shield usa regras de permissão do Claude), etiqueta da AWS e
-  `iron watch` para o Kiro (sem leitor de transcript verificado).
+- **Fora do escopo:** `--harden` (o Iron Shield usa regras de permissão do Claude) e a etiqueta da AWS. O `iron watch --agent=kiro` lê as
+  sessões v2 e v3 (limites na seção 23) e **acusa** o v3 não interativo.
 - **O modelo pode recusar antes do hook:** nos testes o Kiro às vezes se recusou a chamar a ferramenta; isso
   não é o Iron Brake.
 
@@ -477,8 +477,8 @@ verdade não foi rodado em Linux**. Não verificado: Windows, outras versões e 
   expiraram, o que aconteceu em três tentativas sem clique): o comando é bloqueado com "o usuário recusou este comando na janela de confirmação" e o log
   registra `deny`, `dialog: rejected`. A janela espera só 45 s no Codex: janela atrás de outra, ou 45 s sem olhar, vira recusa.
 - **`--dangerously-bypass-hook-trust`** roda hooks sem a confiança persistida; não é usado pelo Iron Brake.
-- **Fora do escopo:** `--harden` (usa regras de permissão do Claude) e `iron watch` (o transcript, `rollout-*.jsonl`, mostra o comando como JavaScript
-  dentro de um `custom_tool_call`; extrair dele seria frágil).
+- **Fora do escopo:** `--harden` (usa regras de permissão do Claude). O `iron watch --agent=codex` lê o rollout (o comando está dentro de um trecho de
+  JavaScript; limites na seção 23).
 
 ## 22. Limites da detecção de agentes e do iron status
 
@@ -494,4 +494,22 @@ verdade não foi rodado em Linux**. Não verificado: Windows, outras versões e 
   são as versões em que cada agente foi testado, não a que está instalada aqui.
 - **Testes e o log real:** os testes do `cmd/iron` que chamam `run(["hook", ...])` gravavam no `~/.iron/audit.log` real de quem rodava a suíte; passaram a usar um `HOME`
   temporário (as entradas antigas continuam no log, que é encadeado por hash e não se edita).
+
+## 23. Limites do iron watch para Kiro e Codex
+
+Leitores verificados com transcripts reais (Kiro 2.26.1, Codex 0.159.3) em 2026-10-01; detalhes dos formatos em [watch.md](watch.md).
+
+- **Kiro v2 não grava horário de término**, e quase só o prompt tem horário. A chamada vale a partir do prompt e a decisão do hook pode vir até 10 min depois, então
+  uma lacuna só é acusada depois desse prazo (no `--once` e no doctor não importa; no modo contínuo o aviso demora). Duas chamadas da mesma classe e sessão nesse prazo
+  podem se cobrir sem querer.
+- **Kiro v3:** só `execute_bash`/`shell`/`execute_cmd`; chamadas `denied` (que não executaram) ficam de fora. O `args.cwd` vem vazio na maioria das chamadas: vale o
+  `workspacePaths` do `session.json`. O hook grava a decisão milissegundos antes de o `tool_call` ser escrito, o que a folga de 2 s cobre.
+- **Codex lê o comando de dentro de JavaScript.** Só `tools.exec_command({cmd: "..."})` com `cmd` em string literal (aspas duplas, simples ou crase sem `${}`) seguida
+  de `,` ou `}`. Concatenação, variável ou outro caminho de execução **não são vistos** (a ausência de lacuna não prova que nada foi executado). Todas as 50 chamadas de
+  shell dos testes eram desse formato com o modelo `gpt-6-luna`; outros modelos não foram testados.
+- **Codex: o resultado pode ser gravado antes da decisão.** No `codex exec`, uma chamada cujo hook espera o clique da janela teve o resultado registrado 31 s depois
+  e a decisão só aos 45 s. Por isso uma decisão vale até 60 s depois do resultado, e a lacuna é acusada com esse atraso. Isso afrouxa a conferência (uma decisão da mesma
+  classe nesses 60 s pode cobrir a chamada errada).
+- **As sessões de todos os projetos ficam numa pasta só** (como no Antigravity): só contam as chamadas cujo diretório está dentro da pasta atual; `--all` tira o filtro.
+- **Não vê** o que o agente executa fora do transcript, nem o que o transcript não registra (o agente escreve esses arquivos; um agente comprometido poderia alterá-los).
 

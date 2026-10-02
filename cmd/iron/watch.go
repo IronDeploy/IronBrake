@@ -28,8 +28,9 @@ const watchUsage = `uso: iron watch [opções]
   --since DUR    com --once, o período conferido (padrão 1h; ex.: 30m, 24h)
   --dir PASTA    pasta de transcripts (padrão: ~/.claude/projects/<esta pasta>)
   --all          todas as pastas de ~/.claude/projects
-  --agent NOME   claude (padrão) ou antigravity: de qual agente ler os transcripts
-                 (antigravity: ~/.gemini/antigravity-cli/brain, só os comandos desta pasta; --all: de todas)
+  --agent NOME   claude (padrão), antigravity, kiro ou codex: de qual agente ler os transcripts
+                 (nos três últimos a pasta é única para todos os projetos: só contam os comandos
+                 desta pasta; --all: de todas)
   --notify       também avisa por notificação do sistema (macOS)
   --grace DUR    espera depois do resultado antes de acusar (padrão 3s)`
 
@@ -113,11 +114,27 @@ func watchAgent(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	switch agent.Name() {
-	case hook.Claude.Name(), hook.Antigravity.Name():
+	if agent.Name() == hook.Claude.Name() {
 		return agent.Name(), nil
 	}
-	return "", fmt.Errorf("o iron watch ainda não lê os transcripts do agente %q (só claude e antigravity)", agent.Name())
+	if _, ok := watchSources[agent.Name()]; ok {
+		return agent.Name(), nil
+	}
+	return "", fmt.Errorf("o iron watch ainda não lê os transcripts do agente %q", agent.Name())
+}
+
+// watchSource descreve onde estão e como se leem os transcripts de um agente
+// cujas sessões de todos os projetos ficam numa pasta só.
+type watchSource struct {
+	format *watch.Format
+	dir    func(home string) string
+	what   string // para a mensagem de erro
+}
+
+var watchSources = map[string]watchSource{
+	hook.Antigravity.Name(): {&watch.AntigravityFormat, watch.BrainDir, "as conversas do Antigravity"},
+	hook.Kiro.Name():        {&watch.KiroFormat, watch.KiroSessionsDir, "as sessões do Kiro"},
+	hook.Codex.Name():       {&watch.CodexFormat, watch.CodexSessionsDir, "as sessões do Codex"},
 }
 
 // watchDeps reúne o que o watch usa do mundo externo, para os testes trocarem.
@@ -173,10 +190,10 @@ func runWatch(args []string, stdout, stderr io.Writer, deps watchDeps) int {
 	}
 
 	src := watch.Source{Classify: rules.Classify, Entries: deps.entries}
-	if opts.agent == hook.Antigravity.Name() {
-		src.Format = &watch.AntigravityFormat
+	if ws, ok := watchSources[opts.agent]; ok {
+		src.Format = ws.format
 		if !opts.all {
-			// as conversas de todos os projetos ficam numa pasta só
+			// as sessões de todos os projetos ficam numa pasta só
 			src.Keep = watch.InProject(deps.cwd)
 		}
 	}
@@ -187,13 +204,13 @@ func runWatch(args []string, stdout, stderr io.Writer, deps watchDeps) int {
 }
 
 func watchDirs(opts watchOptions, deps watchDeps) ([]string, error) {
-	if opts.agent == hook.Antigravity.Name() {
+	if ws, ok := watchSources[opts.agent]; ok {
 		dir := opts.dir
 		if dir == "" {
-			dir = watch.BrainDir(deps.home)
+			dir = ws.dir(deps.home)
 		}
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-			return nil, fmt.Errorf("não achei as conversas do Antigravity (%s); use --dir", dir)
+			return nil, fmt.Errorf("não achei %s (%s); use --dir", ws.what, dir)
 		}
 		return []string{dir}, nil
 	}
@@ -235,6 +252,10 @@ func warnIfHookMissing(agent, cwd, home string, stderr io.Writer) {
 		fmt.Fprintf(stderr, "iron: aviso: o hook do Iron Brake não está em %s; todo comando desta pasta será acusado. rode \"iron init --agent=antigravity\".\n", setup.AntigravityHooksPath(cwd))
 		return
 	}
+	if agent == hook.Kiro.Name() || agent == hook.Codex.Name() {
+		warnIfKiroOrCodexHookMissing(agent, cwd, stderr)
+		return
+	}
 	project := setup.SettingsPath(cwd)
 	for _, path := range []string{project, setup.SettingsPath(home)} {
 		if hooks, err := setup.FindHooks(path); err == nil && len(hooks) > 0 {
@@ -244,6 +265,26 @@ func warnIfHookMissing(agent, cwd, home string, stderr io.Writer) {
 		}
 	}
 	fmt.Fprintf(stderr, "iron: aviso: o hook do Iron Brake não está instalado em %s nem no usuário; todo comando será acusado. rode \"iron init\".\n", project)
+}
+
+// warnIfKiroOrCodexHookMissing: sem o hook na pasta, todo comando seria acusado.
+func warnIfKiroOrCodexHookMissing(agent, cwd string, stderr io.Writer) {
+	var installed bool
+	var err error
+	var where string
+	if agent == hook.Kiro.Name() {
+		var found setup.KiroHooks
+		found, err = setup.FindKiro(cwd)
+		installed, where = len(found.V2) > 0 || len(found.V3) > 0, ".kiro/agents e .kiro/hooks"
+	} else {
+		var found []setup.CodexHook
+		found, err = setup.FindCodex(cwd)
+		installed, where = len(found) > 0, setup.CodexHooksPath(cwd)
+	}
+	if installed || (err != nil && !errors.Is(err, os.ErrNotExist)) {
+		return // instalado, ou arquivo ilegível: não dá para afirmar nada
+	}
+	fmt.Fprintf(stderr, "iron: aviso: o hook do Iron Brake não está em %s; todo comando desta pasta será acusado. rode \"iron init --agent=%s\".\n", where, agent)
 }
 
 func watchOnce(opts watchOptions, dirs []string, src watch.Source, deps watchDeps, stdout, stderr io.Writer) int {

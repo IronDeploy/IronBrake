@@ -95,7 +95,7 @@ func (t *Tracker) Check(now time.Time) ([]Gap, error) {
 			continue
 		}
 		switch {
-		case !c.DoneAt.IsZero() && now.Sub(c.DoneAt) >= t.grace:
+		case !c.DoneAt.IsZero() && now.Sub(c.DoneAt) >= t.grace+c.Slack:
 			due = append(due, c)
 		case c.DoneAt.IsZero() && now.Sub(c.At) > forgetAfter:
 			delete(t.pending, id)
@@ -143,7 +143,7 @@ func (t *Tracker) take(c Call, class string, entries []audit.Entry) bool {
 		if e.Session != "" && e.Session != c.Session {
 			continue
 		}
-		if e.Time.Before(c.At.Add(-skew)) || e.Time.After(c.DoneAt.Add(skew)) {
+		if e.Time.Before(c.At.Add(-skew)) || e.Time.After(c.DoneAt.Add(skew+c.Slack)) {
 			continue
 		}
 		key := e.Time.Format(time.RFC3339Nano) + "|" + e.Session + "|" + e.Class

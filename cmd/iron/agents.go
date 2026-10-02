@@ -12,9 +12,12 @@ import (
 	"time"
 
 	"github.com/IronDeploy/IronBrake/internal/audit"
+	"github.com/IronDeploy/IronBrake/internal/doctor"
 	"github.com/IronDeploy/IronBrake/internal/hook"
+	"github.com/IronDeploy/IronBrake/internal/rules"
 	"github.com/IronDeploy/IronBrake/internal/setup"
 	"github.com/IronDeploy/IronBrake/internal/status"
+	"github.com/IronDeploy/IronBrake/internal/watch"
 	"golang.org/x/term"
 )
 
@@ -225,4 +228,25 @@ func statusHere(stdout, stderr io.Writer) int {
 	})
 	status.Print(stdout, dir, agents, now)
 	return 0
+}
+
+// watchCoverage monta a verificação de cobertura do doctor (o mesmo cruzamento
+// do iron watch --once) para um agente com leitor de transcript. installedFile é
+// o arquivo do hook: o hook não existia antes dele.
+func watchCoverage(agent, dir, home, installedFile string, entries func(time.Time) ([]audit.Entry, error)) *doctor.Coverage {
+	ws, ok := watchSources[agent]
+	if !ok || home == "" {
+		return nil
+	}
+	since := time.Now().Add(-coverageWindow)
+	if info, err := os.Stat(installedFile); err == nil && info.ModTime().After(since) {
+		since = info.ModTime()
+	}
+	return &doctor.Coverage{
+		Dirs: []string{ws.dir(home)},
+		Source: watch.Source{
+			Classify: rules.Classify, Entries: entries, Format: ws.format, Keep: watch.InProject(dir),
+		},
+		Since: since,
+	}
 }

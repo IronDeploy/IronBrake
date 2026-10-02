@@ -43,12 +43,14 @@ func RunKiro(dir, version string, timeout time.Duration, extra Extra) []Result {
 		prazo = checkKiroTimeouts(hooks)
 	}
 
-	return []Result{
+	results := []Result{
 		installed, binary, responds, prazo,
 		CheckTools(extra.ConfigPath, extra.ProjectDir), CheckAudit(extra.Log),
-		kiroLimits(hooks),
-		{Name: nameVersion, OK: true, Detail: version},
 	}
+	if extra.Coverage != nil {
+		results = append(results, CheckCoverage(*extra.Coverage))
+	}
+	return append(results, kiroLimits(hooks), Result{Name: nameVersion, OK: true, Detail: version})
 }
 
 func checkKiroHooks(h setup.KiroHooks, err error) Result {

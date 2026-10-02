@@ -808,6 +808,8 @@ func runDoctorCodex(dir string, stdout io.Writer) int {
 		ConfigPath: toolpath.ConfigPath(),
 		ProjectDir: dir,
 	}
+	home, _ := os.UserHomeDir()
+	extra.Coverage = watchCoverage(hook.Codex.Name(), dir, home, setup.CodexHooksPath(dir), extra.Log.Entries)
 	results := doctor.RunCodex(dir, codexConfigPath(), version, doctorTimeout, extra)
 	doctor.Print(stdout, results)
 	if !doctor.AllOK(results) {
@@ -822,20 +824,8 @@ func runDoctorAntigravity(dir string, stdout io.Writer) int {
 		ConfigPath: toolpath.ConfigPath(),
 		ProjectDir: dir,
 	}
-	if home, err := os.UserHomeDir(); err == nil {
-		since := time.Now().Add(-coverageWindow)
-		if info, err := os.Stat(setup.AntigravityHooksPath(dir)); err == nil && info.ModTime().After(since) {
-			since = info.ModTime() // o hook não existia antes disto
-		}
-		extra.Coverage = &doctor.Coverage{
-			Dirs: []string{watch.BrainDir(home)},
-			Source: watch.Source{
-				Classify: rules.Classify, Entries: extra.Log.Entries,
-				Format: &watch.AntigravityFormat, Keep: watch.InProject(dir),
-			},
-			Since: since,
-		}
-	}
+	home, _ := os.UserHomeDir()
+	extra.Coverage = watchCoverage(hook.Antigravity.Name(), dir, home, setup.AntigravityHooksPath(dir), extra.Log.Entries)
 	results := doctor.RunAntigravity(dir, version, doctorTimeout, extra)
 	doctor.Print(stdout, results)
 	if !doctor.AllOK(results) {
@@ -850,6 +840,8 @@ func runDoctorKiro(dir string, stdout io.Writer) int {
 		ConfigPath: toolpath.ConfigPath(),
 		ProjectDir: dir,
 	}
+	home, _ := os.UserHomeDir()
+	extra.Coverage = watchCoverage(hook.Kiro.Name(), dir, home, filepath.Join(dir, ".kiro", "hooks", "iron-brake.json"), extra.Log.Entries)
 	results := doctor.RunKiro(dir, version, doctorTimeout, extra)
 	doctor.Print(stdout, results)
 	if !doctor.AllOK(results) {

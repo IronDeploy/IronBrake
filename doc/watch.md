@@ -45,8 +45,21 @@ leitura é a cada 1 s: na prática, uns 5 s depois do comando.
 
 ## Limites
 
-- **Só o Claude Code por enquanto** (`~/.claude/projects/<pasta>/<sessão>.jsonl`).
-  Os transcripts dos outros agentes ainda não foram verificados.
+- **Quatro agentes, cada um com o seu leitor** (`--agent=claude|antigravity|kiro|codex`), todos verificados com
+  transcripts reais em 2026-10-01 (Claude Code 2.1.x, Antigravity 1.2.14, Kiro 2.26.1, Codex 0.159.3):
+  - **Claude Code:** `~/.claude/projects/<pasta>/<sessão>.jsonl`.
+  - **Antigravity:** `~/.gemini/antigravity-cli/brain/<conversa>/.system_generated/logs/transcript_full.jsonl`. O `created_at` do passo de
+    resultado é o início dele; a chamada termina na resposta seguinte do modelo.
+  - **Kiro v3:** `~/.kiro/sessions/<projeto>/sess_<uuid>/messages.jsonl` (`tool_call`/`tool_result`, com horário em ms). Chamadas `denied`
+    não executaram e ficam de fora. O `args.cwd` quase sempre vem vazio: vale o `workspacePaths` do `session.json`.
+  - **Kiro v2:** `~/.kiro/sessions/cli/<uuid>.jsonl` (`toolUse`/`toolResult`). **Não há horário de término** e só o prompt costuma ter horário: a chamada
+    vale a partir do prompt e a decisão pode vir até 10 min depois (o prazo do hook), o que afrouxa a conferência.
+  - **Codex:** `~/.codex/sessions/AAAA/MM/DD/rollout-*-<uuid>.jsonl`. O comando está dentro de um trecho de JavaScript
+    (`tools.exec_command({cmd: "..."})`); só se lê `cmd` escrito como string literal seguido de vírgula ou chave (concatenação e variável são
+    ignoradas, para nunca ler um comando pela metade). No `codex exec` o Codex pode gravar o resultado **antes** de o hook terminar (a janela
+    esperando o clique): a decisão vale até 60 s depois do resultado, e o aviso demora esse tempo a mais.
+  - Os agentes que não são o Claude guardam as sessões de **todos os projetos** numa pasta só: o `iron watch` confere só as chamadas cujo
+    diretório está dentro da pasta atual (`--all` tira o filtro). Chamada sem diretório conhecido fica de fora.
 - **O transcript é escrito pelo próprio agente.** Um agente comprometido poderia
   alterá-lo. O watch acha hook que não dispara ou mal configurado, não quem burla
   de propósito (mesmo limite do log de auditoria, [known-issues.md](known-issues.md)).
@@ -63,9 +76,17 @@ leitura é a cada 1 s: na prática, uns 5 s depois do comando.
 - **Precisa estar rodando** para acompanhar ao vivo: não é um serviço (nada de
   launchd/systemd). Use `--once` num agendador ou no CI para conferir depois.
 - **Sem hook instalado**, todo comando é lacuna. O watch avisa no começo se o hook
-  não está na pasta nem no usuário (`~/.claude/settings.json`).
+  não está na pasta (e, no Claude Code, nem no usuário, `~/.claude/settings.json`).
 
-## Verificado
+## Verificado com os outros agentes (2026-10-01)
+
+Com o `iron` real e transcripts reais, nas pastas de teste: **Kiro**, 4 comandos de sessões v2 e v3 com decisão; depois um `echo` no **v3 não
+interativo** (o Kiro não executa hooks) foi acusado como SEM decisão, com 0 entradas no log. **Codex**, 8 comandos: 7 com decisão (inclusive as
+chamadas da janela de confirmação, que só se cobrem com a folga de 60 s) e 1 sem decisão, o `exec` com o hook instalado e ainda não confiado.
+**Antigravity**, com o hook ativo todos cobertos, e com o hook desligado um `echo` acusado. Dois erros achados só com dados reais e corrigidos: o
+`working_dir` vazio do Kiro v2 e o resultado gravado antes da decisão no Codex.
+
+## Verificado (Claude Code)
 
 Em 2026-10-01, com o binário contra o transcript e o log reais da sessão que
 desenvolve o Iron Brake (sem hook instalado): acusou 78 de 80 comandos, as 2

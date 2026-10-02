@@ -16,6 +16,12 @@ type Call struct {
 	Cwd     string    // onde o comando roda, quando o transcript diz (Antigravity)
 	At      time.Time // quando o agente a emitiu
 	DoneAt  time.Time // quando o resultado voltou; zero = ainda sem resultado
+
+	// Slack é quanto depois do DoneAt a decisão do hook ainda pode ser gravada.
+	// Zero: a decisão sempre vem antes do resultado. O Codex grava o resultado
+	// de uma chamada abandonada antes de o hook (esperando a janela) terminar, e
+	// o Kiro v2 não grava horário de término: nos dois a decisão pode vir depois.
+	Slack time.Duration
 }
 
 type record struct {
