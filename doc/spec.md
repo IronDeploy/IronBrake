@@ -5,7 +5,7 @@
 1. **Bloquear só com código de saída 2** ou com JSON `permissionDecision: "deny"`.
    Nunca usar o código 1 no caminho do hook: ele **não** bloqueia.
 2. **Local-first:** nenhuma chamada de rede e nenhuma dependência de servidor.
-   O Iron Brake só executa programas locais (`terraform show`, `osascript`).
+   O Iron Brake só executa programas locais (`terraform show`, `osascript`, `powershell`).
 3. **Nunca imprimir nem gravar valores de segredos.** As mensagens nunca
    repetem o comando recebido nem a saída de programas externos; o cartão de
    risco mostra só endereço e tipo dos recursos, nunca atributos.
@@ -191,7 +191,7 @@ escreve):
 
 Todo ask do Iron Brake (de qualquer regra, somado aos outros da linha) abre a
 janela nativa com o motivo, botões **Cancelar** (padrão) e **Executar**. Sem
-janela (fora do macOS, sem tela), vira o ask do Claude Code.
+janela (Linux, sem tela), vira o ask do Claude Code. A janela existe no macOS (`osascript`) e no Windows (PowerShell).
 
 ## Regra: "sem plano, sem apply" (terraform)
 
@@ -205,8 +205,8 @@ que foi revisado é exatamente o que será executado.
 | plano salvo que não dá para ler (inexistente, sem `terraform init`, formato estranho) | deny |
 | `cd`/`pushd`/`popd` antes do apply na mesma linha | deny: "use terraform -chdir=PASTA apply tfplan" |
 | plano salvo que só cria ou altera | allow |
-| plano salvo que apaga ou substitui, **com janela disponível (macOS)** | janela nativa com o cartão de risco: Executar → allow explícito (se a linha tiver só esse comando; senão, sem opinião); Cancelar ou 8 min sem resposta → deny |
-| plano salvo que apaga ou substitui, **sem janela** (SSH, nuvem, Linux, Windows) | ask com o cartão de risco |
+| plano salvo que apaga ou substitui, **com janela disponível (macOS, Windows)** | janela nativa com o cartão de risco: Executar → allow explícito (se a linha tiver só esse comando; senão, sem opinião); Cancelar ou 8 min sem resposta → deny |
+| plano salvo que apaga ou substitui, **sem janela** (SSH, nuvem, Linux) | ask com o cartão de risco |
 
 "Substituir" (`[delete, create]` ou `[create, delete]`) é tão destrutivo quanto
 apagar: o recurso antigo e os dados dele deixam de existir.

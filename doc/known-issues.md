@@ -98,9 +98,21 @@ Pesquisado na documentação de hooks: `defer` só funciona com `claude -p`;
 `PermissionRequest` decide mas não mostra nada; `terminalSequence` é só
 notificação de terminal. Nenhum resolve.
 
-**Contorno atual:** todo ask abre a janela nativa do macOS com o motivo.
-**Continua sem solução fora do macOS** (Linux, Windows, SSH, nuvem): o
-fallback é o ask do Claude Code, com o motivo invisível na hora de decidir.
+**Contorno atual:** todo ask abre a janela nativa com o motivo, no macOS
+(`osascript`) e no Windows (PowerShell, Windows Forms). **Continua sem solução
+no Linux e em sessões sem tela** (SSH, nuvem): o fallback é o ask do Claude
+Code, com o motivo invisível na hora de decidir. No Windows, sem desktop
+interativo (SSH, serviço) a janela não abre e a resposta é `Unavailable`, o
+mesmo fallback.
+
+**Windows, verificado em 2026-10-02** (Windows 11 ARM64, sessão gráfica): a
+janela aparece com o cartão, aspas e acentuação intactas; **Executar** aprova;
+**Cancelar** é o botão padrão, então Enter, Esc, o X e o tempo esgotado
+recusam. Ponta a ponta com o `iron hook` real: Executar devolve `allow`
+explícito ("aprovado pelo usuário"), Cancelar devolve a recusa para o agente.
+Limites: o PowerShell leva alguns segundos para abrir (o tempo de espera conta a
+partir da janela); janela em tela cheia, vários monitores e o desktop seguro do
+UAC não foram testados.
 
 ## 4. Linha com plan e apply juntos é bloqueada (verificado)
 
@@ -299,7 +311,7 @@ Decisões tomadas depois da revisão:
   - **Não verificado:** o Claude Code (e Kiro, Codex, Antigravity) instalado no
     Windows, só eventos simulados; a ferramenta `PowerShell` do Claude Code
     (o hook instalado tem `matcher` `Bash`); o `iron.exe` x64 (a máquina era
-    ARM64); a janela de confirmação (só macOS). O `install.sh` não roda no
+    ARM64); a janela de confirmação no Linux (a do Windows foi verificada, ver seção 3). O `install.sh` não roda no
     Windows (instalação manual pelo `.exe`). O portão da AWS recusa funcionar lá.
 - **O `SHA256SUMS` vem da mesma release que o binário:** pega download
   corrompido, não release adulterada. A conferência contra adulteração é o
