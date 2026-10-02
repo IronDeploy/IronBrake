@@ -334,9 +334,7 @@ trabalho que o plano original prevê e ainda não começou.
   (agente com credencial de nuvem, o que já deu errado).
 - 3 a 5 testadores usando por duas semanas, com as métricas da seção 11
   (tempo até o primeiro bloqueio, bloqueios indevidos por semana, bloqueios
-  que evitariam dano, times que pedem política central/Slack).
-- Decisão registrada (seguir para o plano de controle, pivotar ou parar) só
-  depois disso — não antes.
+  que evitariam dano).
 
 ## 16. Limites do iron watch
 
