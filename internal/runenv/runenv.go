@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/IronDeploy/IronBrake/internal/pathx"
 )
 
 var envVars = []string{
@@ -38,7 +40,7 @@ func Workspace(dir, dataDir string, readFile func(string) ([]byte, error)) (stri
 	if dataDir == "" {
 		dataDir = ".terraform"
 	}
-	if !filepath.IsAbs(dataDir) {
+	if !pathx.IsAbs(dataDir) {
 		dataDir = filepath.Join(dir, dataDir)
 	}
 	data, err := readFile(filepath.Join(dataDir, "environment"))
@@ -53,8 +55,14 @@ func Workspace(dir, dataDir string, readFile func(string) ([]byte, error)) (stri
 // tiver um, ou de ~/.kube/config.
 func kubeContext(getenv func(string) string, readFile func(string) ([]byte, error)) string {
 	paths := filepath.SplitList(getenv("KUBECONFIG"))
-	if len(paths) == 0 && getenv("HOME") != "" {
-		paths = []string{filepath.Join(getenv("HOME"), ".kube", "config")}
+	if len(paths) == 0 {
+		home := getenv("HOME")
+		if home == "" {
+			home = getenv("USERPROFILE") // o Windows não define HOME
+		}
+		if home != "" {
+			paths = []string{filepath.Join(home, ".kube", "config")}
+		}
 	}
 
 	for _, path := range paths {

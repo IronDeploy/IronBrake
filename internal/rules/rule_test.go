@@ -2,6 +2,7 @@ package rules
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -26,7 +27,7 @@ type ruleCase struct {
 func withFiles(base Env, files map[string]string) Env {
 	base.Cwd = "/work"
 	base.ReadFile = func(path string) ([]byte, error) {
-		if content, ok := files[path]; ok {
+		if content, ok := files[filepath.ToSlash(path)]; ok {
 			return []byte(content), nil
 		}
 		return nil, os.ErrNotExist

@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/IronDeploy/IronBrake/internal/pathx"
 	"github.com/IronDeploy/IronBrake/internal/runenv"
 )
 
@@ -51,7 +52,7 @@ func changeDir(dir string, known bool, args []string) (string, bool) {
 	if target == "" || target == "-" || strings.HasPrefix(target, "~") || strings.ContainsAny(target, "$`*?[") {
 		return dir, false
 	}
-	if filepath.IsAbs(target) {
+	if pathx.IsAbs(target) {
 		return filepath.Clean(target), true
 	}
 	if !known {
@@ -63,7 +64,7 @@ func changeDir(dir string, known bool, args []string) (string, bool) {
 // workspaceDir junta a pasta atual e o -chdir do comando.
 func workspaceDir(dir string, known bool, chdir string) (string, bool) {
 	switch {
-	case chdir != "" && filepath.IsAbs(chdir):
+	case chdir != "" && pathx.IsAbs(chdir):
 		return filepath.Clean(chdir), true
 	case !known:
 		return "", false

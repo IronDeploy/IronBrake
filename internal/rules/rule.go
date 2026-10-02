@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/IronDeploy/IronBrake/internal/hook"
+	"github.com/IronDeploy/IronBrake/internal/pathx"
 	"github.com/IronDeploy/IronBrake/internal/policy"
 )
 
@@ -34,7 +35,7 @@ func (e Env) readTargetFile(path string) (data []byte, ok bool) {
 	if e.ReadFile == nil || path == "" {
 		return nil, false
 	}
-	if !filepath.IsAbs(path) {
+	if !pathx.IsAbs(path) {
 		path = filepath.Join(e.Cwd, path)
 	}
 	data, err := e.ReadFile(path)
