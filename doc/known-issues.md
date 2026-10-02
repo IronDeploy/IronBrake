@@ -188,8 +188,8 @@ travamento usa 1 s. Depois disso, 5 rodadas completas sem falha.
   zerar os contadores. A proteção é contra loops por engano, não contra um
   agente que tenta burlar de propósito.
 - **Evento sem `session_id`:** a memória não roda (não há onde guardar).
-- **Windows não testado:** a trava lá usa o arquivo aberto sem
-  compartilhamento; compila, mas nunca rodou num Windows.
+- **Windows:** a trava lá usa o arquivo aberto sem compartilhamento. **Verificado
+  em 2026-10-02** (Windows 11 ARM64): os testes da trava e da sessão passam.
 - **"Muito parecido" ignora números, nomes de arquivo e ordem das opções:**
   além de espaços, aspas, barras invertidas e maiúsculas, cada sequência de
   dígitos vale igual; o argumento do `terraform apply` (o plano) vale igual
@@ -278,11 +278,29 @@ Decisões tomadas depois da revisão:
 
 ## 13. Limites da distribuição
 
-- **Windows compila, mas não foi testado**; o `install.sh` não roda no
-  Windows (instalação manual pelo `.exe`). O sufixo `.exe` no nome do programa
-  é ignorado pelas regras (verificado: `Terraform.exe destroy` e
-  `kubectl.exe delete namespace` são julgados como no Linux), mas caminhos do
-  Windows (`C:\...`) e `cmd /c` não foram testados.
+- **Windows: validado numa máquina real, com limites.** **Verificado em
+  2026-10-02** num Windows 11 ARM64 (build 26100, UTM no Apple Silicon), com Go
+  1.27.1 nativo: `go vet`, `gofmt` e todos os testes passam; com o `iron.exe`
+  compilado lá, `iron init` grava o hook (`command` + `args`, sem shell),
+  `iron doctor` dá 9/9 e `iron hook` bloqueia force push, `kubectl delete
+  namespace` em produção e `rm -rf` fora do projeto, e libera `rm -rf build`.
+  - **Invólucros:** `cmd /c`, `cmd.exe /c`, `powershell -Command`, `pwsh -c` e
+    `-EncodedCommand` (base64 UTF-16) são abertos e o comando de dentro é julgado
+    como se estivesse solto. Antes, `cmd /c git push --force` passava.
+  - **Remoção recursiva do Windows:** `rmdir /s`, `rd /s`, `del /s` e
+    `Remove-Item -Recurse` (e `ri`) entram na regra de "fora da pasta do
+    projeto". Caminhos com `\` só são lidos dentro de `cmd /c` e
+    `powershell -Command`; fora deles o shell do agente (Git Bash) já trata `\`
+    como escape. Letra de unidade (`C:/x`, `C:\x`) conta como caminho absoluto.
+  - **Permissões:** o `terraform`/`tofu`/`terragrunt` só é executado se nem o
+    arquivo nem a pasta forem graváveis por Todos, Usuários Autenticados ou
+    Usuários (lê a ACL). O `.iron/audit.log` herda a ACL do perfil (só o dono,
+    SYSTEM e Administradores).
+  - **Não verificado:** o Claude Code (e Kiro, Codex, Antigravity) instalado no
+    Windows, só eventos simulados; a ferramenta `PowerShell` do Claude Code
+    (o hook instalado tem `matcher` `Bash`); o `iron.exe` x64 (a máquina era
+    ARM64); a janela de confirmação (só macOS). O `install.sh` não roda no
+    Windows (instalação manual pelo `.exe`). O portão da AWS recusa funcionar lá.
 - **O `SHA256SUMS` vem da mesma release que o binário:** pega download
   corrompido, não release adulterada. A conferência contra adulteração é o
   atestado de proveniência (`gh attestation verify`, ou

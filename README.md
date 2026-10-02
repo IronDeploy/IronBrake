@@ -309,8 +309,11 @@ auditoria recalculando a corrente de hashes, ou editar o `.iron/policy.yaml`
 
 A janela de confirmação com o motivo do bloqueio só existe no macOS. No Linux
 e no Windows, a pergunta aparece pelo Claude Code, mas sem mostrar o porquê
-antes da decisão. O Windows compila e passa nos testes automatizados, mas não
-foi validado numa máquina Windows real.
+antes da decisão. O Windows foi validado numa máquina real (Windows 11 ARM64,
+2026-10-02): os testes passam, e `iron init`, `iron doctor` e `iron hook`
+funcionam com o `iron.exe` compilado lá. Ainda não foi testado com o Claude Code
+instalado no Windows (só com eventos de hook simulados). Detalhes em
+[known-issues.md](doc/known-issues.md#13-limites-da-distribuição).
 
 **Latência**
 
