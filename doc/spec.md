@@ -227,7 +227,7 @@ A lista só aparece quando há recursos apagados ou substituídos.
 
 ## Pendências já decididas
 
-Decididas em 2026-10-01; **não entram na v0.3.0** (a decisão final de cada uma é do dono do projeto).
+Decididas em 2026-10-01; **não entram na v0.3.0**.
 
 ### Cobertura de scripts configurável no `policy.yaml`
 
@@ -236,7 +236,7 @@ mas só segue **2 scripts encadeados** (o que o comando chama e o que esse chama
 O limite é uma constante no código (`maxScriptDepth = 2`, `internal/rules/scripts.go`). A decisão é dar ao usuário
 a possibilidade de **configurar esse nível no `.iron/policy.yaml`**, mantendo 2 como padrão.
 
-Pontos a decidir ao implementar (a decisão é do dono):
+Pontos a definir na implementação:
 
 - nome da chave (por exemplo `script_depth`) e o **teto** (cada nível lê mais arquivos, até 4 MB cada, e custa tempo no hook);
 - o princípio da seção "Produção e o `.iron/policy.yaml`" continua valendo: o arquivo **só soma**. Então o valor só pode

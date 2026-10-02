@@ -119,7 +119,7 @@ WHERE userAgent LIKE '%app/iron-%'`; consulta não testada).
 - **O modelo não foi implantado na AWS.** Foi validado com o `cfn-lint` 1.57.1 e por testes, mas ninguém
   o executou numa conta: confira o e-mail de confirmação do SNS e teste com uma chamada inofensiva.
   Eventos de serviços globais (IAM, por exemplo) chegam só na região `us-east-1`, segundo a documentação do
-  CloudTrail, que não conferi aqui. O atraso do alerta não foi medido.
+  CloudTrail (não verificado neste projeto). O atraso do alerta não foi medido.
 - **O tópico SNS não é criptografado** com chave própria: a chave padrão do SNS impede o EventBridge de
   publicar.
 

@@ -457,7 +457,7 @@ verdade não foi rodado em Linux**. Não verificado: Windows, outras versões e 
   `hooks.json` é mais novo que a última gravação do `config.toml`; **não recalcula o hash** (o algoritmo não foi descoberto), então um hook
   alterado depois da confiança pode passar despercebido se o `config.toml` tiver sido gravado depois por outro motivo.
 - **Os hooks carregam no início da sessão.** Confiar no meio de uma sessão só vale para as próximas. O chat usa um daemon compartilhado
-  (`codex app-server daemon`); numa sessão nova ainda apareceu "hooks disabled until the project is trusted" até eu reiniciar o daemon
+  (`codex app-server daemon`); numa sessão nova ainda apareceu "hooks disabled until the project is trusted" até o daemon ser reiniciado
   (`codex app-server daemon restart`). O hook do chat roda no ambiente do **daemon**, não no do seu terminal.
 - **Prazo e janela.** O `timeout` do hook é em segundos, padrão 600; o `iron init` grava 600. Estourado, o Codex mata o hook e **libera**. No
   chat o Codex espera um hook de 100 s sem problema; no `codex exec` uma chamada com hook acima de ~55 s é **abandonada e refeita** (intermitente:
