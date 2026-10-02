@@ -1,7 +1,6 @@
 package rules
 
 import (
-	"path/filepath"
 	"strings"
 	"unicode"
 )
@@ -39,7 +38,12 @@ func IsSingleCommand(command string) bool {
 
 // programName: sem caminho, em minúsculas (o macOS não diferencia) e sem .exe.
 func programName(token string) string {
-	return strings.TrimSuffix(strings.ToLower(filepath.Base(token)), ".exe")
+	// "\" também separa pastas no Windows (C:\Windows\System32\cmd.exe), em
+	// qualquer sistema em que o hook rode.
+	if i := strings.LastIndexAny(token, `/\`); i >= 0 {
+		token = token[i+1:]
+	}
+	return strings.TrimSuffix(strings.ToLower(token), ".exe")
 }
 
 type lexedCommand struct {
@@ -400,6 +404,10 @@ func innerScript(tokens []string) (string, bool) {
 				return "", false // bash script.sh
 			}
 		}
+	case "cmd":
+		return cmdScript(tokens[1:])
+	case "powershell", "pwsh":
+		return powershellScript(tokens[1:])
 	case "eval":
 		if len(tokens) > 1 {
 			return strings.Join(tokens[1:], " "), true

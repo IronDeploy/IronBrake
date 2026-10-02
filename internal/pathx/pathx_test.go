@@ -16,6 +16,10 @@ func TestIsAbs(t *testing.T) {
 		{"../outro", false},
 		{"/data/prod", true}, // com raiz: absoluto em Unix e "com raiz" no Windows
 		{"a/b", false},
+		{"C:/dados", true}, // letra de unidade: absoluto em qualquer sistema
+		{`c:\dados`, true},
+		{"C:", false},
+		{"C:dados", false},
 	}
 	for _, c := range cases {
 		if got := IsAbs(c.path); got != c.want {

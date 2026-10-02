@@ -14,7 +14,7 @@ Gera em `dist/`:
 |---|---|
 | `iron_linux_amd64`, `iron_linux_arm64` | Linux (estáticos: não dependem de nenhuma biblioteca do sistema) |
 | `iron_darwin_amd64`, `iron_darwin_arm64` | macOS Intel e Apple Silicon (dependem só do `libSystem`, que todo Mac tem) |
-| `iron_windows_amd64.exe`, `iron_windows_arm64.exe` | Windows (compila; **não testado**) |
+| `iron_windows_amd64.exe`, `iron_windows_arm64.exe` | Windows (testado em ARM64, 2026-10-02; x64 só compila e passa no CI; ver [known-issues.md](known-issues.md)) |
 | `install.sh` | instalador para macOS e Linux |
 | `SHA256SUMS` | o hash SHA-256 de cada arquivo acima |
 

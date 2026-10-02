@@ -157,7 +157,7 @@ func checkFile(tool, path string) (string, error) {
 		return "", &UntrustedError{tool, real, "não é um arquivo comum"}
 	}
 	if runtime.GOOS == "windows" {
-		return real, nil // as permissões do Windows não são bits de modo
+		return checkWindows(tool, real) // as permissões do Windows são ACLs, não bits de modo
 	}
 	if info.Mode().Perm()&0o111 == 0 {
 		return "", &UntrustedError{tool, real, "não tem permissão de execução"}

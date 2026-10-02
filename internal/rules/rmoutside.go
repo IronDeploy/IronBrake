@@ -28,10 +28,14 @@ func (rmOutsideRule) Name() string { return "rm-outside-project" }
 
 func (rmOutsideRule) Check(commands [][]string, env Env) (hook.Decision, string) {
 	for _, tokens := range commands {
-		if len(tokens) == 0 || programName(tokens[0]) != "rm" || !isRecursive(tokens[1:]) {
+		if len(tokens) == 0 {
 			continue
 		}
-		for _, path := range positionalPaths(tokens[1:]) {
+		paths, recursive := removalTargets(tokens)
+		if !recursive {
+			continue
+		}
+		for _, path := range paths {
 			outside, unknown := classifyPath(path, env.Cwd)
 			switch {
 			case outside:
