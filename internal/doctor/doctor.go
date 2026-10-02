@@ -359,7 +359,8 @@ func checkBinary(command string) Result {
 
 	// Caminho relativo seria resolvido dentro do projeto, que pode ser de
 	// terceiros: só executamos caminho absoluto ou procurado no PATH.
-	if strings.ContainsRune(command, filepath.Separator) && !filepath.IsAbs(command) {
+	// "/" também é separador no Windows: ./bin/iron é relativo lá também.
+	if strings.ContainsAny(command, "/"+string(filepath.Separator)) && !filepath.IsAbs(command) {
 		result.Detail = fmt.Sprintf("o caminho %s é relativo", command)
 		result.Fix = "rode iron init de novo para gravar o caminho absoluto."
 		return result

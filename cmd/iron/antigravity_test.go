@@ -129,7 +129,7 @@ func TestRunHookAntigravityBrokenInputBlocks(t *testing.T) {
 }
 
 func TestRunHookAntigravityViaFlagAndAlias(t *testing.T) {
-	t.Setenv("HOME", t.TempDir()) // o hook de verdade grava no log de auditoria do usuário
+	setHome(t, t.TempDir()) // o hook de verdade grava no log de auditoria do usuário
 	for _, flag := range []string{"--agent=antigravity", "--agent=agy"} {
 		var stdout, stderr bytes.Buffer
 		code := run([]string{"hook", flag}, strings.NewReader("{"), &stdout, &stderr)
