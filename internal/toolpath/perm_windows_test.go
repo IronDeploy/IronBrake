@@ -53,8 +53,14 @@ func TestResolveWindowsTrustsPrivateFolder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pasta privada deveria ser confiável: %v", err)
 	}
-	if !strings.EqualFold(got, path) {
-		t.Errorf("caminho %q, quero %q", got, path)
+	// O Resolve devolve o caminho com os links resolvidos, e isso troca o nome
+	// curto 8.3 do TEMP (C:\Users\RUNNER~1) pelo longo (C:\Users\runneradmin).
+	want, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.EqualFold(got, want) {
+		t.Errorf("caminho %q, quero %q", got, want)
 	}
 }
 
