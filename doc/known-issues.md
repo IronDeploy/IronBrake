@@ -446,7 +446,7 @@ e a cobertura do doctor (sem lacuna com o hook ativo, uma lacuna acusada com o h
 Verificado com o Codex CLI **0.159.3** (macOS), em 2026-10-01, com o agente real e o `iron` real: bloqueio de `git push --force` e liberação de
 `git status` no `codex exec` e no chat; hook de 600 s; `agent: codex` no log; `iron doctor --agent=codex` (falha sem a confiança, passa com ela);
 a etiqueta da AWS nos comandos. Em **Linux** (Docker, usuário não root) foi verificado o binário `iron` real com o payload capturado; o **Codex de
-verdade não foi rodado em Linux**. Não verificado: Windows, outras versões, outros modelos, e a janela de confirmação (ver abaixo).
+verdade não foi rodado em Linux**. Não verificado: Windows, outras versões e outros modelos.
 
 - **O Codex LIBERA o comando quando o hook falha.** Só bloqueiam o exit 2 (com o motivo no stderr, que o modelo recebe) e o JSON
   `hookSpecificOutput.permissionDecision: "deny"` (ou `{"decision":"block"}`). Exit 1, stdout que não é JSON, `{}`, `{"decision":"deny"}`,
@@ -472,6 +472,10 @@ verdade não foi rodado em Linux**. Não verificado: Windows, outras versões, o
 - **Etiqueta da AWS:** `[shell_environment_policy] set = { AWS_SDK_UA_APP_ID = "iron-codex" }` num `.codex/config.toml` **do projeto** chega aos comandos
   no `exec` e no chat (verificado). O `iron init` só cria o arquivo; se ele já existe, mostra o trecho a acrescentar (não há leitor de TOML). Não
   verificado com chamadas reais à AWS.
+- **Janela de confirmação (`ask` do Iron Brake), verificada com o Codex real nos dois lados.** "Executar" (clicado pelo usuário no `codex exec`): o hook
+  sai 0 em silêncio ("Completed"), o comando executa e o log registra `decision: userApproved`, `dialog: approved`. Sem aprovação (Cancelar, ou os 45 s
+  expiraram, o que aconteceu em três tentativas sem clique): o comando é bloqueado com "o usuário recusou este comando na janela de confirmação" e o log
+  registra `deny`, `dialog: rejected`. A janela espera só 45 s no Codex: janela atrás de outra, ou 45 s sem olhar, vira recusa.
 - **`--dangerously-bypass-hook-trust`** roda hooks sem a confiança persistida; não é usado pelo Iron Brake.
 - **Fora do escopo:** `--harden` (usa regras de permissão do Claude) e `iron watch` (o transcript, `rollout-*.jsonl`, mostra o comando como JavaScript
   dentro de um `custom_tool_call`; extrair dele seria frágil).
