@@ -23,8 +23,16 @@ jobs:
           with:
             go-version-file: go.mod
             cache: true
-        - name: Run tests
+        - name: Check formatting
+          shell: bash
           run: |
-            go vet ./...
-            gofmt -l
-            make test
+            unformatted="$(gofmt -l .)"
+            if [ -n "$unformatted" ]; then
+              echo "arquivos sem gofmt:" >&2
+              echo "$unformatted" >&2
+              exit 1
+            fi
+        - name: Vet
+          run: go vet ./...
+        - name: Run tests
+          run: make test

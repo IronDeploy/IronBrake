@@ -1,0 +1,3 @@
+# Fim de linha LF em todo lugar, inclusive no Windows: o gofmt e as fixtures dos testes
+# (hashes, JSON de eventos reais) não podem mudar com o autocrlf do runner.
+* text=auto eol=lf
