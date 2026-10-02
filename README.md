@@ -333,6 +333,9 @@ make build    # bin/iron para esta máquina
 make dist     # dist/: 6 binários (Linux, macOS, Windows × amd64, arm64) + SHA256SUMS
 ```
 
+Para contribuir (commits, como propor uma regra, como escrever testes que
+passem no Windows), veja o [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Licença
 
 [Apache 2.0](LICENSE).
