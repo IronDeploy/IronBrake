@@ -164,7 +164,7 @@ func TestRunInitCodexTagWithExistingConfigAndHarden(t *testing.T) {
 
 func TestCodexConfigPath(t *testing.T) {
 	t.Setenv("CODEX_HOME", "/x/codex-home")
-	if got := codexConfigPath(); got != "/x/codex-home/config.toml" {
+	if got := codexConfigPath(); got != filepath.Join("/x/codex-home", "config.toml") {
 		t.Errorf("CODEX_HOME deveria valer: %q", got)
 	}
 	t.Setenv("CODEX_HOME", "")

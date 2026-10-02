@@ -12,6 +12,7 @@ import (
 
 	"github.com/IronDeploy/IronBrake/internal/audit"
 	"github.com/IronDeploy/IronBrake/internal/rules"
+	"github.com/IronDeploy/IronBrake/internal/testutil/fakesh"
 	"github.com/IronDeploy/IronBrake/internal/watch"
 )
 
@@ -31,18 +32,28 @@ const (
 	settingsFile = "settings.json"
 )
 
+// newFakeIron cria o "iron" de mentira em dir/bin. Sem bit de execução (mode)
+// é um arquivo comum; no Windows isso basta para não ser executável, porque
+// lá só vale o que termina em .exe.
 func newFakeIron(t *testing.T, dir, script string, mode os.FileMode) string {
 	t.Helper()
 
 	path := filepath.Join(dir, "bin", "iron")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
+	if mode&0o111 == 0 {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(script), mode); err != nil {
+			t.Fatal(err)
+		}
+		return path
 	}
-	if err := os.WriteFile(path, []byte(script), mode); err != nil {
-		t.Fatal(err)
-	}
+	return fakesh.Install(t, path, script)
+}
 
-	return path
+func TestMain(m *testing.M) {
+	fakesh.MaybeRun()
+	os.Exit(m.Run())
 }
 
 func settingsWith(t *testing.T, matcher string, commands ...string) string {

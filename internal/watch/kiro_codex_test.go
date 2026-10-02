@@ -348,7 +348,7 @@ func TestCodexFilesAndSessionsDirs(t *testing.T) {
 		t.Errorf("padrão: %q", got)
 	}
 	t.Setenv("CODEX_HOME", "/x/ch")
-	if got := CodexSessionsDir("/home/u"); got != "/x/ch/sessions" {
+	if got := CodexSessionsDir("/home/u"); got != filepath.Join("/x/ch", "sessions") {
 		t.Errorf("CODEX_HOME: %q", got)
 	}
 	if got := KiroSessionsDir("/home/u"); got != filepath.Join("/home/u", ".kiro", "sessions") {

@@ -4,14 +4,17 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 )
 
+// fakeFiles simula arquivos por caminho. Os caminhos são comparados com "/":
+// o código sob teste monta caminhos com filepath.Join (barra invertida no Windows).
 func fakeFiles(files map[string]string) func(string) ([]byte, error) {
 	return func(path string) ([]byte, error) {
-		content, ok := files[path]
+		content, ok := files[filepath.ToSlash(path)]
 		if !ok {
 			return nil, fs.ErrNotExist
 		}
@@ -47,10 +50,21 @@ func TestCollectKubeconfigFromEnv(t *testing.T) {
 	files := fakeFiles(map[string]string{
 		"/b/config": "current-context: prd-cluster\n",
 	})
-	env := fakeEnv(map[string]string{"KUBECONFIG": "/a/nao-existe:/b/config"})
+	env := fakeEnv(map[string]string{"KUBECONFIG": "/a/nao-existe" + string(filepath.ListSeparator) + "/b/config"})
 
 	if got := Collect("/proj", env, files); !slices.Contains(got, "prd-cluster") {
 		t.Errorf("faltou o contexto do kubectl: %q", got)
+	}
+}
+
+func TestCollectKubeconfigDefaultUsesUserProfile(t *testing.T) {
+	files := fakeFiles(map[string]string{
+		"/Users/ana/.kube/config": "current-context: prd-cluster\n",
+	})
+	env := fakeEnv(map[string]string{"USERPROFILE": "/Users/ana"}) // Windows: sem HOME
+
+	if got := Collect("/proj", env, files); !slices.Contains(got, "prd-cluster") {
+		t.Errorf("sem HOME, o USERPROFILE deveria achar ~/.kube/config: %q", got)
 	}
 }
 

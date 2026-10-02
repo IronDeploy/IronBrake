@@ -103,7 +103,7 @@ func TestRunHookKiroBrokenInputBlocks(t *testing.T) {
 }
 
 func TestRunHookKiroViaFlag(t *testing.T) {
-	t.Setenv("HOME", t.TempDir()) // o hook de verdade grava no log de auditoria do usuário
+	setHome(t, t.TempDir()) // o hook de verdade grava no log de auditoria do usuário
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"hook", "--agent=kiro"}, strings.NewReader("{"), &stdout, &stderr); code != 2 {
 		t.Errorf("esperava 2, obtive %d (%s)", code, stderr.String())

@@ -35,8 +35,14 @@ func Scan(fs Filesystem, env map[string]string) []Finding {
 
 // display encurta o caminho para ~/... na hora de mostrar (rótulo seguro).
 func (fs Filesystem) display(path string) string {
-	if fs.Home != "" && strings.HasPrefix(path, fs.Home) {
-		return "~" + strings.TrimPrefix(path, fs.Home)
+	if fs.Home == "" {
+		return path
+	}
+	// Home e path passam por Clean para o prefixo casar mesmo com separadores
+	// diferentes (Windows). O rótulo sai sempre com "/": é o que as pessoas
+	// leem e o que o shield casa.
+	if home := filepath.Clean(fs.Home); strings.HasPrefix(path, home) {
+		return "~" + filepath.ToSlash(strings.TrimPrefix(path, home))
 	}
 	return path
 }

@@ -63,6 +63,7 @@ func InstallKiro(dir, exePath string) (KiroResult, error) {
 	hasDefault := false
 	for _, f := range files {
 		rel, _ := filepath.Rel(dir, f)
+		rel = filepath.ToSlash(rel) // texto para a pessoa ler: sempre com "/"
 		changed, v3, name, err := mergeKiroAgent(f, cmd)
 		if err != nil {
 			return res, err
@@ -85,7 +86,7 @@ func InstallKiro(dir, exePath string) (KiroResult, error) {
 		if err := writeNewKiroDefault(path, cmd); err != nil {
 			return res, err
 		}
-		res.Changed = append(res.Changed, filepath.Join(kiroAgentsDir, kiroDefaultAgent+".json"))
+		res.Changed = append(res.Changed, kiroAgentsDir+"/"+kiroDefaultAgent+".json")
 	}
 
 	changed, err := mergeKiroHooksFile(filepath.Join(dir, kiroHooksFile), cmd)
@@ -266,6 +267,7 @@ func FindKiro(dir string) (KiroHooks, error) {
 	}
 	for _, f := range agents {
 		rel, _ := filepath.Rel(dir, f)
+		rel = filepath.ToSlash(rel)
 		data, err := os.ReadFile(f)
 		if err != nil {
 			return found, err
@@ -312,6 +314,7 @@ func FindKiro(dir string) (KiroHooks, error) {
 	}
 	for _, f := range files {
 		rel, _ := filepath.Rel(dir, f)
+		rel = filepath.ToSlash(rel)
 		data, err := os.ReadFile(f)
 		if err != nil {
 			return found, err

@@ -204,7 +204,7 @@ func TestInitContinuesAfterOneAgentFails(t *testing.T) {
 }
 
 func TestRunStatus(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	t.Setenv("CODEX_HOME", "")
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"status"}, strings.NewReader(""), &stdout, &stderr); code != 0 {

@@ -126,10 +126,11 @@ func lastDecision(entries []audit.Entry, agent string) *audit.Entry {
 	return last
 }
 
-// rel mostra o caminho relativo à pasta, que é o que a pessoa reconhece.
+// rel mostra o caminho relativo à pasta, que é o que a pessoa reconhece,
+// sempre com "/" (o ".kiro/agents" ao lado já sai assim).
 func rel(dir, path string) string {
 	if r, err := filepath.Rel(dir, path); err == nil {
-		return r
+		return filepath.ToSlash(r)
 	}
 	return path
 }

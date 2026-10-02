@@ -3,6 +3,7 @@ package awsgate
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -234,7 +235,7 @@ func TestApprovals(t *testing.T) {
 	}
 
 	info, err := os.Stat(filepath.Join(a.Dir, "grants.json"))
-	if err != nil || info.Mode().Perm() != 0o600 {
+	if err != nil || (runtime.GOOS != "windows" && info.Mode().Perm() != 0o600) {
 		t.Errorf("o arquivo deveria ter 0600: %v %v", info, err)
 	}
 	data, _ := os.ReadFile(filepath.Join(a.Dir, "grants.json"))

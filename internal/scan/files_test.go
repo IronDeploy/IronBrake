@@ -8,11 +8,18 @@ import (
 )
 
 // fakeFS monta um filesystem em memória para as fixtures (tudo falso).
-func fakeFS(home, cwd string, files map[string]string) Filesystem {
+func fakeFS(home, cwd string, raw map[string]string) Filesystem {
+	// As chaves vêm de filepath.Join (barra invertida no Windows): normaliza
+	// para "/" e faz o mesmo com todo caminho consultado.
+	files := make(map[string]string, len(raw))
+	for p, content := range raw {
+		files[filepath.ToSlash(p)] = content
+	}
 	return Filesystem{
 		Home: home,
 		Cwd:  cwd,
 		Read: func(path string) ([]byte, error) {
+			path = filepath.ToSlash(path)
 			if content, ok := files[path]; ok {
 				return []byte(content), nil
 			}
@@ -24,7 +31,7 @@ func fakeFS(home, cwd string, files map[string]string) Filesystem {
 			// sintetizada a partir de um arquivo mais fundo.
 			var names []string
 			seen := map[string]bool{}
-			prefix := dir + "/"
+			prefix := filepath.ToSlash(dir) + "/"
 			for p := range files {
 				rest, ok := strings.CutPrefix(p, prefix)
 				if !ok {

@@ -21,7 +21,7 @@ func TestAntigravityParseEventRealSamples(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if ev.Command != "echo oi" || ev.Tool != "run_command" || !ev.Shell || ev.Cwd != "/home/dev/projeto" ||
+			if ev.Command != "echo oi" || ev.Tool != "run_command" || !ev.Shell || filepath.ToSlash(ev.Cwd) != "/home/dev/projeto" ||
 				len(ev.SessionID) != 36 {
 				t.Errorf("evento inesperado: %+v", ev)
 			}
@@ -59,7 +59,8 @@ func TestAntigravityCwd(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := antigravityCwd(c.cwd, c.ws); got != c.want {
+			// As amostras têm caminhos Unix; no Windows o Clean troca "/" por "\\".
+			if got := antigravityCwd(c.cwd, c.ws); filepath.ToSlash(got) != c.want {
 				t.Errorf("antigravityCwd(%q, %v) = %q, quero %q", c.cwd, c.ws, got, c.want)
 			}
 		})

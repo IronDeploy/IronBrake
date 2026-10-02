@@ -3,6 +3,7 @@ package filelock
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -61,6 +62,9 @@ func TestWaiterGetsLockWhenReleased(t *testing.T) {
 }
 
 func TestLockFileIsPrivate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("o Windows não tem os bits de permissão do Unix (0600/0700)")
+	}
 	path := filepath.Join(t.TempDir(), "x.lock")
 	release, err := Acquire(path, time.Second)
 	if err != nil {

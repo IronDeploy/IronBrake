@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,7 +108,8 @@ func TestRunKiroBinaryMissing(t *testing.T) {
 func TestRunKiroWarnsAboutDoubleExecution(t *testing.T) {
 	dir, iron := installedKiro(t, scriptDeny)
 	cmd := `'` + iron + `' hook --agent=kiro`
-	upgraded := `{"name":"meu","hooks":[{"name":"x","trigger":"preToolUse","matcher":".*","action":{"type":"command","command":"` + cmd + `"},"timeout":600}]}`
+	quoted, _ := json.Marshal(cmd) // o caminho do Windows tem "\\", que no JSON precisa de escape
+	upgraded := `{"name":"meu","hooks":[{"name":"x","trigger":"preToolUse","matcher":".*","action":{"type":"command","command":` + string(quoted) + `},"timeout":600}]}`
 	if err := os.WriteFile(filepath.Join(dir, ".kiro/agents/meu.json"), []byte(upgraded), 0o644); err != nil {
 		t.Fatal(err)
 	}

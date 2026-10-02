@@ -3,6 +3,7 @@ package session
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -143,6 +144,9 @@ func TestStoreNeverWritesCommand(t *testing.T) {
 }
 
 func TestStoreFilesArePrivate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("o Windows não tem os bits de permissão do Unix (0600/0700)")
+	}
 	dir := filepath.Join(t.TempDir(), "sessions")
 	Store{Dir: dir}.Check("sessao-1", Activity{Command: "kubectl get pods"}, at(0))
 

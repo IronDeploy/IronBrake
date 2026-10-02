@@ -4,9 +4,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/IronDeploy/IronBrake/internal/hook"
+	"github.com/IronDeploy/IronBrake/internal/pathx"
 )
 
 const rmOutsideDanger = "rm recursivo em um caminho fora da pasta do projeto: apaga dados que o projeto não controla, sem volta."
@@ -97,7 +99,7 @@ func classifyPath(path, cwd string) (outside, unknown bool) {
 
 // outsideProject: o caminho, já sem variáveis, fica fora de cwd e das pastas temporárias.
 func outsideProject(path, cwd string) bool {
-	if !filepath.IsAbs(path) {
+	if !pathx.IsAbs(path) {
 		if cwd == "" {
 			return strings.HasPrefix(path, "..")
 		}
@@ -108,9 +110,13 @@ func outsideProject(path, cwd string) bool {
 		return false
 	}
 	for _, root := range tempRoots {
-		if within(path, root) {
+		if within(path, filepath.Clean(root)) {
 			return false
 		}
+	}
+	// No Windows a pasta temporária é %TEMP% (C:\Users\...\AppData\Local\Temp).
+	if tmp := os.TempDir(); runtime.GOOS == "windows" && tmp != "" && within(path, filepath.Clean(tmp)) {
+		return false
 	}
 	return true
 }
@@ -119,7 +125,7 @@ func outsideProject(path, cwd string) bool {
 func expandHome(path string) (string, bool) {
 	for _, prefix := range []string{"~", "${HOME}", "$HOME"} {
 		rest, found := strings.CutPrefix(path, prefix)
-		if !found || (rest != "" && rest[0] != '/') {
+		if !found || (rest != "" && rest[0] != '/' && rest[0] != filepath.Separator) {
 			continue
 		}
 		home, err := os.UserHomeDir()
@@ -131,6 +137,9 @@ func expandHome(path string) (string, bool) {
 	return path, true
 }
 
+// within diz se path é root ou está dentro dele. Os dois já passaram por
+// filepath.Clean, então o separador é o do sistema (barra invertida no Windows).
 func within(path, root string) bool {
-	return path == root || strings.HasPrefix(path, strings.TrimSuffix(root, "/")+"/")
+	sep := string(filepath.Separator)
+	return path == root || strings.HasPrefix(path, strings.TrimSuffix(root, sep)+sep)
 }

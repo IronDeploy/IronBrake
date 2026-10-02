@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -295,7 +296,7 @@ func TestWriteFileAtomic(t *testing.T) {
 	if err := writeFileAtomic(path, []byte("novo\n")); err != nil {
 		t.Fatal(err)
 	}
-	if info, _ := os.Stat(path); info.Mode().Perm() != 0o644 {
+	if info, _ := os.Stat(path); runtime.GOOS != "windows" && info.Mode().Perm() != 0o644 {
 		t.Errorf("arquivo novo deve sair 0644: %v", info.Mode().Perm())
 	}
 
@@ -304,7 +305,7 @@ func TestWriteFileAtomic(t *testing.T) {
 	if err := writeFileAtomic(path, []byte("outro\n")); err != nil {
 		t.Fatal(err)
 	}
-	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
+	if info, _ := os.Stat(path); runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Errorf("deve manter 0600: %v", info.Mode().Perm())
 	}
 	if data, _ := os.ReadFile(path); string(data) != "outro\n" {
@@ -325,6 +326,9 @@ func TestWriteFileAtomic(t *testing.T) {
 }
 
 func TestSetEnvKeepsFilePermission(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("o Windows não tem os bits de permissão do Unix (0600/0700)")
+	}
 	path := newSettingsPath(t, `{}`)
 	os.Chmod(path, 0o600)
 

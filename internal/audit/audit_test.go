@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -76,6 +77,9 @@ func TestAppendChainsLines(t *testing.T) {
 }
 
 func TestLogIsPrivate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("o Windows não tem os bits de permissão do Unix (0600/0700)")
+	}
 	log := newLog(t, 1)
 
 	for path, want := range map[string]os.FileMode{log.Path: 0o600, filepath.Dir(log.Path): 0o700} {

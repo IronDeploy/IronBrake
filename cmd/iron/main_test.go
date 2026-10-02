@@ -19,6 +19,7 @@ import (
 	"github.com/IronDeploy/IronBrake/internal/rules"
 	"github.com/IronDeploy/IronBrake/internal/session"
 	"github.com/IronDeploy/IronBrake/internal/setup"
+	"github.com/IronDeploy/IronBrake/internal/testutil/fakesh"
 	"github.com/IronDeploy/IronBrake/internal/tfplan"
 )
 
@@ -32,6 +33,19 @@ func openEvent(t *testing.T, file string) *os.File {
 	t.Cleanup(func() { input.Close() })
 
 	return input
+}
+
+func TestMain(m *testing.M) {
+	fakesh.MaybeRun()
+	os.Exit(m.Run())
+}
+
+// setHome aponta o home do usuário para dir. No Windows o Go lê USERPROFILE,
+// não HOME: sem os dois o teste gravaria no home real.
+func setHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 }
 
 func fakeReadPlan(req tfplan.Request) ([]byte, error) {
@@ -362,7 +376,7 @@ func isolateEnv(t *testing.T, policyYAML string) {
 		}
 	}
 	t.Setenv("CLAUDE_PROJECT_DIR", project)
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	for _, name := range []string{"KUBECONFIG", "TF_WORKSPACE", "AWS_PROFILE", "AWS_DEFAULT_PROFILE", "CLOUDSDK_ACTIVE_CONFIG_NAME", "CLOUDSDK_CORE_PROJECT"} {
 		t.Setenv(name, "")
 	}
@@ -530,7 +544,7 @@ func TestRunInitInvalidSettingsFailsWithoutTouchingFile(t *testing.T) {
 func TestRunShieldStatusLockUnlock(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	t.Setenv("HOME", t.TempDir()) // isola o log de auditoria de ~/.iron real
+	setHome(t, t.TempDir()) // isola o log de auditoria de ~/.iron real
 	settings := filepath.Join(dir, ".claude", "settings.json")
 
 	t.Run("status sem iron init nem harden: tudo destravado", func(t *testing.T) {
@@ -615,7 +629,7 @@ func TestRunShieldStatusLockUnlock(t *testing.T) {
 func TestRunShieldUnlockWithoutAnySettingsIsANoop(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	var stdout, stderr bytes.Buffer
 
 	code := run([]string{"shield", "unlock"}, strings.NewReader(""), &stdout, &stderr)
@@ -650,7 +664,7 @@ func TestRunShieldLockUnlockWriteAuditEntries(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	run([]string{"shield", "lock"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
 	run([]string{"shield", "unlock"}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
@@ -671,18 +685,12 @@ func TestRunShieldLockUnlockWriteAuditEntries(t *testing.T) {
 func TestRunDoctor(t *testing.T) {
 	// Cada caso isola o HOME: o doctor confere o log de auditoria de ~/.iron.
 	t.Run("tudo certo sai com 0", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		setHome(t, t.TempDir())
 		t.Setenv("PATH", t.TempDir()) // nenhum terraform: o resultado não depende da máquina
 		dir := t.TempDir()
 		// Um "iron" de mentira que bloqueia, instalado pelo próprio init:
 		// assim o teste cobre o ciclo init -> doctor.
-		iron := filepath.Join(dir, "bin", "iron")
-		if err := os.MkdirAll(filepath.Dir(iron), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(iron, []byte("#!/bin/sh\necho bloqueado >&2\nexit 2\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
+		iron := fakesh.Install(t, filepath.Join(dir, "bin", "iron"), "#!/bin/sh\necho bloqueado >&2\nexit 2\n")
 		if _, err := setup.InstallHook(setup.SettingsPath(dir), iron); err != nil {
 			t.Fatal(err)
 		}
@@ -702,16 +710,10 @@ func TestRunDoctor(t *testing.T) {
 	})
 
 	t.Run("log de auditoria sem gravação faz o doctor falhar", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		setHome(t, t.TempDir())
 		t.Setenv("PATH", t.TempDir())
 		dir := t.TempDir()
-		iron := filepath.Join(dir, "bin", "iron")
-		if err := os.MkdirAll(filepath.Dir(iron), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(iron, []byte("#!/bin/sh\nexit 2\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
+		iron := fakesh.Install(t, filepath.Join(dir, "bin", "iron"), "#!/bin/sh\nexit 2\n")
 		if _, err := setup.InstallHook(setup.SettingsPath(dir), iron); err != nil {
 			t.Fatal(err)
 		}
@@ -727,7 +729,7 @@ func TestRunDoctor(t *testing.T) {
 	})
 
 	t.Run("qualquer falha sai com código diferente de 0", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		setHome(t, t.TempDir())
 		var stdout bytes.Buffer
 
 		code := runDoctor(t.TempDir(), &stdout) // pasta sem .claude/settings.json
@@ -769,7 +771,7 @@ func TestRunDispatch(t *testing.T) {
 	})
 
 	t.Run("hook chega na lógica do hook", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir()) // o hook de verdade grava no log de auditoria do usuário
+		setHome(t, t.TempDir()) // o hook de verdade grava no log de auditoria do usuário
 		var stdout, stderr bytes.Buffer
 
 		code := run([]string{"hook"}, openEvent(t, "git-push-force.json"), &stdout, &stderr)
@@ -969,7 +971,7 @@ func TestRunHookAuditFailureDoesNotChangeDecision(t *testing.T) {
 }
 
 func TestRunAuditVerify(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	log := audit.Log{Path: audit.DefaultPath()}
 
 	var stdout, stderr bytes.Buffer
@@ -1027,7 +1029,7 @@ func TestRunHookDeadlineDenies(t *testing.T) {
 }
 
 func TestAuditLogFollowsPolicy(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 
 	if got := auditLog(policy.AuditLog{}); got.MaxSize != 0 || got.Keep != 0 {
 		t.Errorf("sem configuração deveria deixar o padrão do audit, obtive %+v", got)
