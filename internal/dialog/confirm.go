@@ -24,8 +24,8 @@ const (
 const (
 	DefaultWait = 480 * time.Second
 
-	// killMargin: o osascript tem esse tempo a mais para devolver a resposta
-	// depois de desistir sozinho.
+	// killMargin: o osascript (ou o PowerShell) tem esse tempo a mais para
+	// devolver a resposta depois de desistir sozinho.
 	killMargin = 20 * time.Second
 )
 
@@ -47,22 +47,35 @@ var script = []string{
 // Caminho absoluto: um osascript falso no PATH aprovaria tudo sozinho.
 const osascriptPath = "/usr/bin/osascript"
 
-// Confirm mostra a mensagem numa janela do macOS e espera a resposta pelo
-// tempo padrão.
+// Confirm mostra a mensagem numa janela do sistema (macOS ou Windows) e espera
+// a resposta pelo tempo padrão.
 func Confirm(message string) Answer { return ConfirmWithin(message, DefaultWait) }
 
 // ConfirmWithin é o Confirm com o tempo de espera escolhido. Sem tempo
-// (wait <= 0) não abre janela: a resposta é Unavailable.
+// (wait <= 0) ou sem janela no sistema (Linux), não abre nada: a resposta é
+// Unavailable.
 func ConfirmWithin(message string, wait time.Duration) Answer {
-	if runtime.GOOS != "darwin" || wait < time.Second {
+	if wait < time.Second {
 		return Unavailable
 	}
+	switch runtime.GOOS {
+	case "darwin":
+		return run(osascriptPath, append(slices.Clone(script), message, strconv.Itoa(int(wait.Seconds()))), wait)
+	case "windows":
+		return run(powershellPath(), powershellArgs(message, wait), wait)
+	}
+	return Unavailable
+}
 
+// run executa o programa da janela e traduz a saída. Desistir por tempo conta
+// como recusa.
+func run(program string, args []string, wait time.Duration) Answer {
 	ctx, cancel := context.WithTimeout(context.Background(), wait+killMargin)
 	defer cancel()
 
-	args := append(slices.Clone(script), message, strconv.Itoa(int(wait.Seconds())))
-	output, err := exec.CommandContext(ctx, osascriptPath, args...).Output()
+	cmd := exec.CommandContext(ctx, program, args...)
+	hideWindow(cmd)
+	output, err := cmd.Output()
 	if ctx.Err() != nil {
 		return Rejected
 	}
