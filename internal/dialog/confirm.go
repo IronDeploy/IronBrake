@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"runtime"
 	"slices"
@@ -15,7 +16,7 @@ type Answer string
 const (
 	Approved    Answer = "approved"
 	Rejected    Answer = "rejected"    // Cancelar, Esc ou tempo esgotado
-	Unavailable Answer = "unavailable" // sem janela (fora do macOS, sem tela)
+	Unavailable Answer = "unavailable" // sem janela (sem tela, SSH, programa ausente)
 )
 
 // A janela desiste antes de o agente liberar o comando (600 s no Claude Code);
@@ -23,11 +24,12 @@ const (
 // agentes passam o próprio tempo em ConfirmWithin.
 const (
 	DefaultWait = 480 * time.Second
-
-	// killMargin: o osascript (ou o PowerShell) tem esse tempo a mais para
-	// devolver a resposta depois de desistir sozinho.
-	killMargin = 20 * time.Second
 )
+
+// killMargin: o osascript (o PowerShell, o zenity) tem esse tempo a mais para
+// devolver a resposta depois de desistir sozinho. É variável só para o teste
+// do programa travado não esperar 20 s.
+var killMargin = 20 * time.Second
 
 // A mensagem entra por argv, nunca no código do script: nomes de recursos
 // vêm do .tf, que o agente escreve. Cancelar lança o erro -128, que o try
@@ -47,12 +49,12 @@ var script = []string{
 // Caminho absoluto: um osascript falso no PATH aprovaria tudo sozinho.
 const osascriptPath = "/usr/bin/osascript"
 
-// Confirm mostra a mensagem numa janela do sistema (macOS ou Windows) e espera
+// Confirm mostra a mensagem numa janela do sistema (macOS, Windows ou Linux) e espera
 // a resposta pelo tempo padrão.
 func Confirm(message string) Answer { return ConfirmWithin(message, DefaultWait) }
 
 // ConfirmWithin é o Confirm com o tempo de espera escolhido. Sem tempo
-// (wait <= 0) ou sem janela no sistema (Linux), não abre nada: a resposta é
+// (wait <= 0) ou sem janela no sistema, não abre nada: a resposta é
 // Unavailable.
 func ConfirmWithin(message string, wait time.Duration) Answer {
 	if wait < time.Second {
@@ -63,6 +65,8 @@ func ConfirmWithin(message string, wait time.Duration) Answer {
 		return run(osascriptPath, append(slices.Clone(script), message, strconv.Itoa(int(wait.Seconds()))), wait)
 	case "windows":
 		return run(powershellPath(), powershellArgs(message, wait), wait)
+	case "linux":
+		return confirmLinux(zenityPath, message, wait, os.Getenv)
 	}
 	return Unavailable
 }
