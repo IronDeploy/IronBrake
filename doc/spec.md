@@ -191,7 +191,7 @@ escreve):
 
 Todo ask do Iron Brake (de qualquer regra, somado aos outros da linha) abre a
 janela nativa com o motivo, botões **Cancelar** (padrão) e **Executar**. Sem
-janela (Linux, sem tela), vira o ask do Claude Code. A janela existe no macOS (`osascript`) e no Windows (PowerShell).
+janela (sem tela, ou sem o `zenity` no Linux), vira o ask do Claude Code. A janela existe no macOS (`osascript`), no Windows (PowerShell) e no Linux (`zenity`).
 
 ## Regra: "sem plano, sem apply" (terraform)
 
@@ -205,8 +205,8 @@ que foi revisado é exatamente o que será executado.
 | plano salvo que não dá para ler (inexistente, sem `terraform init`, formato estranho) | deny |
 | `cd`/`pushd`/`popd` antes do apply na mesma linha | deny: "use terraform -chdir=PASTA apply tfplan" |
 | plano salvo que só cria ou altera | allow |
-| plano salvo que apaga ou substitui, **com janela disponível (macOS, Windows)** | janela nativa com o cartão de risco: Executar → allow explícito (se a linha tiver só esse comando; senão, sem opinião); Cancelar ou 8 min sem resposta → deny |
-| plano salvo que apaga ou substitui, **sem janela** (SSH, nuvem, Linux) | ask com o cartão de risco |
+| plano salvo que apaga ou substitui, **com janela disponível (macOS, Windows, Linux com `zenity`)** | janela nativa com o cartão de risco: Executar → allow explícito (se a linha tiver só esse comando; senão, sem opinião); Cancelar ou 8 min sem resposta → deny |
+| plano salvo que apaga ou substitui, **sem janela** (SSH, nuvem, Linux sem `zenity`) | ask com o cartão de risco |
 
 "Substituir" (`[delete, create]` ou `[create, delete]`) é tão destrutivo quanto
 apagar: o recurso antigo e os dados dele deixam de existir.

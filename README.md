@@ -156,7 +156,7 @@ audit_log:            # opcional: guardar mais do log de auditoria (de 5 a 100)
   keep: 10            # arquivos antigos guardados (padrão 5)
 ```
 
-No macOS e no Windows, "pergunta" abre uma janela com o motivo e os botões **Cancelar** e
+No macOS, no Windows e no Linux (com `zenity` instalado e uma sessão gráfica), "pergunta" abre uma janela com o motivo e os botões **Cancelar** e
 **Executar**; o Claude espera a sua resposta. Toda decisão fica registrada em
 `~/.iron/audit.log` (sem o comando, só a classe), e `iron audit verify`
 confere se o log foi alterado. O log gira sozinho (5 MB por arquivo, 5 antigos guardados) sem quebrar a
@@ -202,7 +202,7 @@ No Kiro, o `iron init` grava o hook nos dois formatos: dentro do agente (`.kiro/
 lê assim) e em `.kiro/hooks/iron-brake.json` (o v3). Se a pasta não tem `kiro_default.json`, ele
 cria um mínimo, que **substitui o agente padrão do Kiro nessa pasta** (sem o prompt longo dele); agentes
 que já existem recebem o hook sem perder o resto. O Kiro não entende "perguntar": quando o Iron Brake
-precisaria perguntar, ele mostra a própria janela (macOS e Windows) e, sem janela, bloqueia. Limites em
+precisaria perguntar, ele mostra a própria janela (macOS, Windows e Linux com `zenity`) e, sem janela, bloqueia. Limites em
 [doc/known-issues.md](doc/known-issues.md) (seção 19).
 
 No Antigravity, o `iron init` grava o conjunto `iron-brake` em `.agents/hooks.json` do projeto (o resto do
@@ -307,9 +307,10 @@ auditoria recalculando a corrente de hashes, ou editar o `.iron/policy.yaml`
 
 **Plataforma**
 
-A janela de confirmação com o motivo do bloqueio existe no macOS e no Windows
-(PowerShell). No Linux, e em sessões sem tela (SSH, nuvem), a pergunta aparece
-pelo Claude Code, mas sem mostrar o porquê antes da decisão. O Windows foi validado numa máquina real (Windows 11 ARM64,
+A janela de confirmação com o motivo do bloqueio existe no macOS, no Windows
+(PowerShell) e no Linux (`zenity`, em `/usr/bin/zenity`, com X11 ou Wayland). Em
+sessões sem tela (SSH, nuvem) ou sem o `zenity`, a pergunta aparece pelo Claude
+Code, mas sem mostrar o porquê antes da decisão. O Windows foi validado numa máquina real (Windows 11 ARM64,
 2026-10-02): os testes passam, e `iron init`, `iron doctor` e `iron hook`
 funcionam com o `iron.exe` compilado lá. Ainda não foi testado com o Claude Code
 instalado no Windows (só com eventos de hook simulados). Detalhes em

@@ -99,11 +99,11 @@ Pesquisado na documentação de hooks: `defer` só funciona com `claude -p`;
 notificação de terminal. Nenhum resolve.
 
 **Contorno atual:** todo ask abre a janela nativa com o motivo, no macOS
-(`osascript`) e no Windows (PowerShell, Windows Forms). **Continua sem solução
-no Linux e em sessões sem tela** (SSH, nuvem): o fallback é o ask do Claude
-Code, com o motivo invisível na hora de decidir. No Windows, sem desktop
-interativo (SSH, serviço) a janela não abre e a resposta é `Unavailable`, o
-mesmo fallback.
+(`osascript`), no Windows (PowerShell, Windows Forms) e no Linux (`zenity`).
+**Continua sem solução em sessões sem tela** (SSH, nuvem) e no Linux sem o
+`zenity`: o fallback é o ask do Claude Code, com o motivo invisível na hora de
+decidir. No Windows, sem desktop interativo (SSH, serviço) a janela não abre e a
+resposta é `Unavailable`, o mesmo fallback.
 
 **Windows, verificado em 2026-10-02** (Windows 11 ARM64, sessão gráfica): a
 janela aparece com o cartão, aspas e acentuação intactas; **Executar** aprova;
@@ -113,6 +113,31 @@ explícito ("aprovado pelo usuário"), Cancelar devolve a recusa para o agente.
 Limites: o PowerShell leva alguns segundos para abrir (o tempo de espera conta a
 partir da janela); janela em tela cheia, vários monitores e o desktop seguro do
 UAC não foram testados.
+
+**Linux, verificado em 2026-10-02** (Docker arm64, Debian trixie, `zenity`
+4.1.90, Xvfb + openbox, cliques com `xdotool`; roteiro em
+`scripts/test-dialog-linux.sh`): **Executar** aprova; **Cancelar**, Enter (o
+padrão), Esc, fechar a janela e o tempo esgotado recusam; sem `DISPLAY` nem
+`WAYLAND_DISPLAY` a resposta é `Unavailable` e o programa nem é executado. Texto
+hostil (`$(...)`, crase, `<b>`, `--ok-label=...`) aparece como texto puro e não
+executa nada. Só o código de saída 0 do `zenity` aprova.
+Limites:
+- **`kdialog` não é usado.** Medido: o botão padrão dele é sempre o afirmativo
+  (Enter aprova) e não há opção para mudar; inverter os rótulos faria a
+  aprovação depender do código 1, que também é o código de erro dele. Um KDE
+  sem `zenity` cai no fallback (ask do Claude Code).
+- O programa é o `/usr/bin/zenity` (caminho absoluto, contra um `zenity` falso no
+  PATH): distribuições sem `/usr/bin/zenity` (NixOS, `zenity` de Flatpak ou Snap)
+  caem no fallback.
+- O texto é cortado em 24 linhas e 1600 caracteres (marcado com …): sem isso o
+  `zenity` cresce além da tela e os botões somem. Num cartão enorme, o fim da
+  lista (inclusive "... e mais N") pode não aparecer.
+- Sem display de verdade o `zenity` sai com 1, o mesmo código do Cancelar; o
+  Iron Brake distingue pelo "display" no stderr do GTK. Se essa mensagem mudar,
+  o resultado é uma recusa (deny), nunca uma aprovação.
+- **Não verificado:** GNOME, KDE ou Wayland de verdade (só Xvfb), o `zenity` 3.x
+  abrindo a janela (só as opções foram conferidas), vários monitores, um clique
+  humano (os cliques foram do `xdotool`) e o Claude Code no Linux.
 
 ## 4. Linha com plan e apply juntos é bloqueada (verificado)
 
@@ -311,7 +336,7 @@ Decisões tomadas depois da revisão:
   - **Não verificado:** o Claude Code (e Kiro, Codex, Antigravity) instalado no
     Windows, só eventos simulados; a ferramenta `PowerShell` do Claude Code
     (o hook instalado tem `matcher` `Bash`); o `iron.exe` x64 (a máquina era
-    ARM64); a janela de confirmação no Linux (a do Windows foi verificada, ver seção 3). O `install.sh` não roda no
+    ARM64); a janela de confirmação num desktop Linux real (Windows e Linux em Docker foram verificados, ver seção 3). O `install.sh` não roda no
     Windows (instalação manual pelo `.exe`). O portão da AWS recusa funcionar lá.
 - **O `SHA256SUMS` vem da mesma release que o binário:** pega download
   corrompido, não release adulterada. A conferência contra adulteração é o
