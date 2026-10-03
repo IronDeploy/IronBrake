@@ -110,6 +110,8 @@ janela aparece com o cartão, aspas e acentuação intactas; **Executar** aprova
 **Cancelar** é o botão padrão, então Enter, Esc, o X e o tempo esgotado
 recusam. Ponta a ponta com o `iron hook` real: Executar devolve `allow`
 explícito ("aprovado pelo usuário"), Cancelar devolve a recusa para o agente.
+**Com o Claude Code 2.1.288 real** (mesma máquina): Executar fez o comando rodar e
+Cancelar o impediu, com `userApproved`/`rejected` no log (tabela na seção 13).
 Limites: o PowerShell leva alguns segundos para abrir (o tempo de espera conta a
 partir da janela); janela em tela cheia, vários monitores e o desktop seguro do
 UAC não foram testados.
@@ -333,10 +335,32 @@ Decisões tomadas depois da revisão:
     arquivo nem a pasta forem graváveis por Todos, Usuários Autenticados ou
     Usuários (lê a ACL). O `.iron/audit.log` herda a ACL do perfil (só o dono,
     SYSTEM e Administradores).
-  - **Não verificado:** o Claude Code (e Kiro, Codex, Antigravity) instalado no
-    Windows, só eventos simulados; a ferramenta `PowerShell` do Claude Code
-    (o hook instalado tem `matcher` `Bash`); o `iron.exe` x64 (a máquina era
-    ARM64); a janela de confirmação num desktop Linux real (Windows e Linux em Docker foram verificados, ver seção 3). O `install.sh` não roda no
+  - **Claude Code 2.1.288 real no Windows: verificado em 2026-10-02.**
+    Máquina: a mesma (Windows 11 ARM64), Claude Code nativo
+    (`irm https://claude.ai/install.ps1 | iex`), modo auto, Git for Windows 2.55
+    instalado (por isso a ferramenta `Bash` existe), `iron.exe` da `main`,
+    `iron init` numa pasta de teste, `iron doctor` 9/9. Cada prompt pediu um
+    comando exato à ferramenta indicada; o resultado foi conferido na tela e no
+    `audit.log` (corrente íntegra):
+
+    | Comando pedido ao agente | O que se viu | Log |
+    |---|---|---|
+    | `git push --force origin main` (Bash) | bloqueado antes de rodar; o motivo chegou ao modelo, que não tentou alternativa | `deny`, `git-force-push` |
+    | `echo iron-ok` (Bash) | passou | `allow` |
+    | `git reset --hard` (Bash), **Executar** | a janela abriu; o comando rodou (falhou: a pasta não era repositório) | `userApproved`, `dialog: approved` |
+    | `git reset --hard` (Bash), **Cancelar** | o comando **não** rodou; o modelo recebeu "o usuário recusou… não tente de novo" | `deny`, `dialog: rejected` |
+    | `Write-Output ps-ok` (**PowerShell**) | passou | **nenhuma linha**: o hook não viu |
+
+    Isso fecha o exit 2 ponta a ponta no Windows (bloqueio e recusa na janela).
+  - **Limite: a ferramenta `PowerShell` do Claude Code não passa pelo hook**
+    (o `matcher` instalado é `Bash`). Medido: `Write-Output` pela ferramenta
+    PowerShell rodou sem nenhuma linha no log. Com o Git for Windows instalado
+    o agente tem as duas ferramentas; **sem o Git, só a PowerShell**, e o Iron
+    Brake não vê nada. O que ele vê no Windows hoje é a ferramenta `Bash`. Falta
+    capturar um evento real da ferramenta PowerShell para ampliar o `matcher`.
+  - **Não verificado:** Kiro, Codex e Antigravity no Windows (só eventos
+    simulados); o `terraform apply` destrutivo pelo agente real no Windows; o
+    `iron.exe` x64 (a máquina era ARM64); a janela de confirmação num desktop Linux real (Windows e Linux em Docker foram verificados, ver seção 3). O `install.sh` não roda no
     Windows (instalação manual pelo `.exe`). O portão da AWS recusa funcionar lá.
 - **O `SHA256SUMS` vem da mesma release que o binário:** pega download
   corrompido, não release adulterada. A conferência contra adulteração é o

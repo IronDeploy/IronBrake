@@ -312,8 +312,10 @@ A janela de confirmação com o motivo do bloqueio existe no macOS, no Windows
 sessões sem tela (SSH, nuvem) ou sem o `zenity`, a pergunta aparece pelo Claude
 Code, mas sem mostrar o porquê antes da decisão. O Windows foi validado numa máquina real (Windows 11 ARM64,
 2026-10-02): os testes passam, e `iron init`, `iron doctor` e `iron hook`
-funcionam com o `iron.exe` compilado lá. Ainda não foi testado com o Claude Code
-instalado no Windows (só com eventos de hook simulados). Detalhes em
+funcionam com o `iron.exe` compilado lá. Com o Claude Code 2.1.288 real no Windows,
+a ferramenta `Bash` passa pelo hook (bloqueio, liberação e janela com Executar e
+Cancelar verificados). **A ferramenta `PowerShell` do Claude Code não passa pelo
+hook ainda**, e sem o Git for Windows ela é a única que o agente usa. Detalhes em
 [known-issues.md](doc/known-issues.md#13-limites-da-distribuição).
 
 **Latência**
