@@ -1,0 +1,5 @@
+# Mudanças nestes caminhos exigem revisão do responsável (quando a regra de
+# branch "Require review from Code Owners" está ativa).
+/internal/rules/  @MikaelMartins
+/internal/hook/   @MikaelMartins
+/.github/         @MikaelMartins
