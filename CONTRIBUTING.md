@@ -5,6 +5,8 @@ comando, se ele passa, pede confirmação ou é bloqueado. Um erro aqui custa em
 um de dois sentidos: deixar passar algo destrutivo, ou travar quem trabalha.
 Este guia diz como mudar o projeto sem piorar nenhum dos dois.
 
+Ao participar, você concorda em seguir o [Código de Conduta](CODE_OF_CONDUCT.md).
+
 Antes de mexer em regras, leia as **regras invioláveis** em
 [doc/spec.md](doc/spec.md). Elas valem para qualquer mudança:
 
