@@ -342,6 +342,8 @@ make dist     # dist/: 6 binários (Linux, macOS, Windows × amd64, arm64) + SHA
 Para contribuir (commits, como propor uma regra, como escrever testes que
 passem no Windows), veja o [CONTRIBUTING.md](CONTRIBUTING.md).
 
+Encontrou uma vulnerabilidade? Não abra issue pública: siga o [SECURITY.md](SECURITY.md).
+
 ## Licença
 
 [Apache 2.0](LICENSE).
