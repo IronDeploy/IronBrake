@@ -1,0 +1,30 @@
+name: Funcionalidade
+description: Sugerir algo novo ou uma melhoria
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Não cole segredos** (chaves, tokens, senhas) **nem o conteúdo do `audit.log`**.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema
+      description: O que você não consegue fazer hoje, ou que atrapalha
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposta
+      description: Como você imagina que funcionaria
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativas
+      description: O que você considerou ou já faz como contorno
+    validations:
+      required: false
