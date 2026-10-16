@@ -1,0 +1,53 @@
+name: Falso negativo
+description: Um comando que passou e deveria ter sido barrado
+title: "falso negativo: "
+labels: ["falso-negativo"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Não cole segredos** (chaves, tokens, senhas) **nem o conteúdo do `audit.log`**.
+        Troque valores sensíveis do comando por `XXXX` antes de colar.
+  - type: input
+    id: version
+    attributes:
+      label: Versão do iron
+      description: Saída de `iron version`
+      placeholder: iron 0.3.0
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Comando que passou
+      description: O comando exato, sem segredos
+      render: shell
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Ambiente
+      description: O comando mirava produção?
+      options:
+        - Produção
+        - Fora de produção
+        - Não sei
+    validations:
+      required: true
+  - type: dropdown
+    id: expected
+    attributes:
+      label: Saída esperada
+      options:
+        - Bloqueado (deny)
+        - Pedir confirmação (ask)
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Por que ele devia ser barrado
+      description: O que esse comando destrói ou expõe
+    validations:
+      required: true

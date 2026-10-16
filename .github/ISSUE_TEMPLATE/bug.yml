@@ -1,0 +1,61 @@
+name: Bug
+description: O iron falhou, travou ou se comportou de um jeito que não é o documentado
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Não cole segredos** (chaves, tokens, senhas) **nem o conteúdo do `audit.log`**.
+        Se um comando tem um valor sensível, troque-o por `XXXX` antes de colar.
+  - type: input
+    id: version
+    attributes:
+      label: Versão do iron
+      description: Saída de `iron version`
+      placeholder: iron 0.3.0
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agente e versão
+      description: Qual agente roda o hook e em que versão
+      placeholder: Claude Code 2.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Sistema operacional
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Outro
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: O que aconteceu
+      description: O que você esperava e o que viu no lugar
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Como reproduzir
+      placeholder: |
+        1. iron init
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Saída do `iron doctor`
+      description: Rode `iron doctor` (ou `iron doctor --agent=NOME`) e cole o resultado
+      render: text
+    validations:
+      required: true
