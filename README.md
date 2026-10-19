@@ -314,8 +314,10 @@ Code, mas sem mostrar o porquê antes da decisão. O Windows foi validado numa m
 2026-10-02): os testes passam, e `iron init`, `iron doctor` e `iron hook`
 funcionam com o `iron.exe` compilado lá. Com o Claude Code 2.1.288 real no Windows,
 a ferramenta `Bash` passa pelo hook (bloqueio, liberação e janela com Executar e
-Cancelar verificados). **A ferramenta `PowerShell` do Claude Code não passa pelo
-hook ainda**, e sem o Git for Windows ela é a única que o agente usa. Detalhes em
+Cancelar verificados), e a ferramenta `PowerShell` também (force push barrado,
+`Remove-Item -Recurse` fora do projeto com janela), inclusive sem o Git for Windows,
+quando ela é a única que o agente usa. Quem instalou antes precisa rodar
+`iron init` de novo para ampliar o matcher. Detalhes em
 [known-issues.md](doc/known-issues.md#13-limites-da-distribuição).
 
 **Latência**

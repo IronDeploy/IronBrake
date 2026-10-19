@@ -1,0 +1,18 @@
+{
+  "session_id": "sessao-exemplo-ps",
+  "transcript_path": "C:\\Users\\exemplo\\.claude\\projects\\C--Users-exemplo-proj\\sessao-exemplo-ps.jsonl",
+  "cwd": "C:\\Users\\exemplo\\proj",
+  "scratchpad_dir": "C:\\Users\\exemplo\\AppData\\Local\\Temp\\claude\\C--Users-exemplo-proj\\sessao-exemplo-ps\\scratchpad",
+  "prompt_id": "prompt-exemplo-ps",
+  "permission_mode": "auto",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "PowerShell",
+  "tool_input": {
+    "command": "git push --force origin main",
+    "description": "Force push main to origin"
+  },
+  "tool_use_id": "toolu_exemplo_ps"
+}

@@ -352,12 +352,41 @@ Decisões tomadas depois da revisão:
     | `Write-Output ps-ok` (**PowerShell**) | passou | **nenhuma linha**: o hook não viu |
 
     Isso fecha o exit 2 ponta a ponta no Windows (bloqueio e recusa na janela).
-  - **Limite: a ferramenta `PowerShell` do Claude Code não passa pelo hook**
-    (o `matcher` instalado é `Bash`). Medido: `Write-Output` pela ferramenta
-    PowerShell rodou sem nenhuma linha no log. Com o Git for Windows instalado
-    o agente tem as duas ferramentas; **sem o Git, só a PowerShell**, e o Iron
-    Brake não vê nada. O que ele vê no Windows hoje é a ferramenta `Bash`. Falta
-    capturar um evento real da ferramenta PowerShell para ampliar o `matcher`.
+  - **A ferramenta `PowerShell` do Claude Code passa pelo hook (verificado em
+    2026-10-19, Claude Code 2.1.303).** Até então o `matcher` instalado era
+    `Bash`, e um `Write-Output` pedido à ferramenta PowerShell rodava sem
+    nenhuma linha no log. O evento real (`tool_name: "PowerShell"`,
+    `tool_input.command`, como o Bash) está em
+    `testdata/events/claude/`. Agora o `iron init` instala o `matcher`
+    `Bash|PowerShell`, e quem já tinha o hook com `Bash` tem o matcher ampliado
+    no lugar (sem hook duplicado). O texto da PowerShell é analisado com `\`
+    como separador de pasta (`C:\dados`), como no `powershell -Command`.
+    Medido no Windows 11 ARM64 com o Git for Windows instalado (o agente tem as
+    duas ferramentas), cada pedido dizendo qual ferramenta usar:
+
+    | Comando pedido à ferramenta PowerShell | O que se viu | Log |
+    |---|---|---|
+    | `git push --force origin main` | bloqueado antes de rodar | `deny`, `git-force-push` |
+    | `Remove-Item -Recurse -Force C:\...\alvo` (fora do projeto), **Cancelar** | a janela abriu; nada foi apagado | `deny`, `rm-outside-project`, `dialog: rejected` |
+    | `Remove-Item -Recurse -Force .\build.txt` (no projeto) | rodou | `allow` |
+    | `Write-Output ps-ok` | rodou | `allow` |
+
+    Quem instalou antes: o `iron doctor` (e o `iron status`) avisam que o hook
+    só pega a ferramenta Bash e mandam rodar `iron init` de novo.
+  - **Limite: o texto da PowerShell é lido com o tokenizador do shell POSIX.**
+    Testados pela ferramenta PowerShell: `git push --force` e
+    `Remove-Item -Recurse` (as demais regras recebem o mesmo texto, mas não
+    foram exercitadas por ela). Cmdlets sem regra própria e recursos exclusivos
+    da PowerShell (`$env:X`, o escape com crase, pipelines de objetos) não são
+    entendidos.
+  - **Sem o Git for Windows (verificado em 2026-10-19):** com a pasta do Git
+    renomeada, o agente só tem a ferramenta PowerShell (o ambiente declara
+    `shell: PowerShell`, sem Bash) e o hook viu cada comando: o force push foi
+    barrado (`deny`, `git-force-push`), o `Remove-Item -Recurse` fora do projeto
+    abriu a janela e, com **Cancelar**, nada foi apagado (`deny`,
+    `rm-outside-project`, `dialog: rejected`), e o `Write-Output` passou
+    (`allow`). O `Remove-Item` dentro do projeto não foi repetido nesta rodada
+    (o agente consultou o arquivo e não o removeu); ele foi verificado com o Git.
   - **Não verificado:** Kiro, Codex e Antigravity no Windows (só eventos
     simulados); o `terraform apply` destrutivo pelo agente real no Windows; o
     `iron.exe` x64 (a máquina era ARM64); a janela de confirmação num desktop Linux real (Windows e Linux em Docker foram verificados, ver seção 3). O `install.sh` não roda no

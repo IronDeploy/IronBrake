@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -167,6 +168,9 @@ func probeClaude(in Input, a *Agent) {
 		return
 	}
 	a.Installed, a.Where = true, rel(in.Dir, path)
+	if !slices.ContainsFunc(hooks, func(h setup.Hook) bool { return setup.MatcherCovers(h.Matcher, "PowerShell") }) {
+		a.Warnings = append(a.Warnings, "o hook só pega a ferramenta Bash; a ferramenta PowerShell do Claude Code passa sem análise (rode iron init para ampliar)")
+	}
 	for _, h := range hooks {
 		if h.Timeout != 0 && h.Timeout < hook.MinTimeout.Seconds() {
 			a.Warnings = append(a.Warnings, fmt.Sprintf("timeout de %g s: o Claude Code desiste antes do prazo do Iron Brake (mínimo %g s) e deixa o comando passar", h.Timeout, hook.MinTimeout.Seconds()))

@@ -10,8 +10,12 @@ type Event struct {
 	Tool string
 
 	// Shell diz se a ferramenta executa comandos de shell. Cada Agent decide
-	// o que conta como shell (Claude Code: "Bash").
+	// o que conta como shell (Claude Code: "Bash" e "PowerShell").
 	Shell bool
+
+	// PowerShell diz que Command é texto de PowerShell, onde "\" separa
+	// pastas (C:\dados), e não um escape como no shell POSIX.
+	PowerShell bool
 
 	SessionID string
 

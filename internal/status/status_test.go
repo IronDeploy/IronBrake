@@ -2,6 +2,7 @@ package status
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -167,6 +168,33 @@ func TestCollectWarnings(t *testing.T) {
 	}
 	if k := byName(agents, "kiro"); !k.Installed || len(k.Warnings) != 1 || !strings.Contains(k.Warnings[0], "Kiro v3") {
 		t.Errorf("kiro sem o hook do v3: %+v", k)
+	}
+}
+
+// Instalação de uma versão sem a PowerShell: o hook existe, mas só pega a ferramenta Bash.
+func TestCollectLegacyMatcherWarnsAboutPowerShell(t *testing.T) {
+	dir := t.TempDir()
+	in := input(t, dir)
+	exe := fakeIron(t)
+	// json.Marshal: no Windows o caminho tem "\", que colado numa string JSON viraria escape inválido.
+	legacy, err := json.Marshal(map[string]any{"hooks": map[string]any{"PreToolUse": []any{map[string]any{
+		"matcher": "Bash",
+		"hooks":   []any{map[string]any{"type": "command", "command": exe, "args": []any{"hook"}}},
+	}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(setup.SettingsPath(dir)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(setup.SettingsPath(dir), legacy, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	claude := byName(Collect(in), "claude")
+
+	if !claude.Installed || len(claude.Warnings) != 1 || !strings.Contains(claude.Warnings[0], "PowerShell") || !strings.Contains(claude.Warnings[0], "iron init") {
+		t.Errorf("claude com matcher antigo deveria avisar da PowerShell e de iron init: %+v", claude)
 	}
 }
 
