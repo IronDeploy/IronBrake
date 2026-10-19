@@ -71,6 +71,10 @@ jobs:
             dist/SHA256SUMS
       - name: Criar a release
         # O gh já vem instalado no runner: não precisa de ação de terceiros.
-        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
+        # As notas são o modelo (.github/release-notes.md, com a tag no link)
+        # seguido do changelog gerado, agrupado por .github/release.yml.
+        run: |
+          sed "s|{{TAG}}|$GITHUB_REF_NAME|g" .github/release-notes.md > "$RUNNER_TEMP/notes.md"
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

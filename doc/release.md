@@ -45,6 +45,24 @@ hook que aponta para um binário que sumiu **não bloqueia nada**.
    O fluxo `.github/workflows/release.yml` roda os testes, gera o `dist/` e,
    depois da aprovação, cria a release com todos os arquivos.
 
+## Notas da release
+
+As notas são montadas pelo fluxo em duas partes:
+
+1. O modelo [`.github/release-notes.md`](../.github/release-notes.md), com a
+   seção "Limites conhecidos desta versão". Ela aponta para o
+   `doc/known-issues.md` **na tag** da release (o fluxo troca `{{TAG}}` pela
+   tag), então o link mostra os limites daquela versão, não os da `main`.
+2. O changelog gerado pelo GitHub a partir dos PRs desde a release anterior,
+   agrupado por label em [`.github/release.yml`](../.github/release.yml):
+   Segurança, Agentes, Regras, Documentação, Dependências e Outras mudanças.
+   Um PR cai na primeira categoria que casar; PR sem label vai para "Outras
+   mudanças". Por isso o PR precisa de pelo menos um label (ver "Issues e
+   labels" no [CONTRIBUTING](../CONTRIBUTING.md)).
+
+Antes de criar a tag, confira se o `known-issues.md` está em dia: é ele que a
+seção "Limites conhecidos" mostra.
+
 ## Segurança do fluxo
 
 - **Ações fixadas pelo SHA do commit** (`actions/checkout@3d3c42e…  # v7.0.1`).

@@ -1,0 +1,30 @@
+# Agrupa as notas geradas da release (gh release create --generate-notes)
+# pelos labels dos PRs. Um PR cai na primeira categoria que casar.
+changelog:
+  categories:
+    - title: Segurança
+      labels:
+        - seguranca
+        - falso-negativo
+    - title: Agentes
+      labels:
+        - agente:claude
+        - agente:codex
+        - agente:kiro
+        - agente:antigravity
+        - agente:novo
+    - title: Regras
+      labels:
+        - area:regras
+        - area:hook
+        - falso-positivo
+    - title: Documentação
+      labels:
+        - documentation
+        - area:docs
+    - title: Dependências
+      labels:
+        - dependencies
+    - title: Outras mudanças
+      labels:
+        - "*"
