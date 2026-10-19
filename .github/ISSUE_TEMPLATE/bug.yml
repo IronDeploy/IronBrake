@@ -1,7 +1,7 @@
 name: Bug
 description: O iron falhou, travou ou se comportou de um jeito que não é o documentado
 title: "bug: "
-labels: ["bug"]
+labels: ["bug", "precisa-triagem"]
 body:
   - type: markdown
     attributes:

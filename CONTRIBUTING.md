@@ -42,6 +42,24 @@ Para um mapa de onde fica cada coisa, veja
 [doc/how-it-works.md](doc/how-it-works.md). Para testar à mão, sem abrir o
 agente, veja [doc/testing.md](doc/testing.md).
 
+## Issues e labels
+
+Toda issue aberta pelos formulários nasce com o label `precisa-triagem` e
+entra na coluna Triagem do quadro do projeto. Quem triou tira esse label e põe
+os outros.
+
+| Grupo | Labels | Regra |
+| --- | --- | --- |
+| Tipo | `bug`, `enhancement`, `falso-negativo`, `falso-positivo`, `documentation`, `seguranca`, `infra-repo`, `verificacao` | Um por issue. |
+| Área | `area:regras`, `area:hook`, `area:instalador`, `area:doctor`, `area:watch`, `area:aws`, `area:shield`, `area:auditoria`, `area:release`, `area:docs` | Pelo menos uma, a parte do código afetada. |
+| Agente | `agente:claude`, `agente:codex`, `agente:kiro`, `agente:antigravity`, `agente:novo` | Só se o problema é de um agente específico. |
+| Sistema | `os:linux`, `os:macos`, `os:windows` | Só se o problema é de um sistema específico. |
+| Prioridade | `prio:alta`, `prio:media`, `prio:baixa` | Uma, posta na triagem. `prio:alta` é o que precisa sair antes da próxima release. |
+| Estado | `precisa-triagem`, `bloqueada` | `bloqueada` é para quem depende de algo externo; diga do quê num comentário. |
+
+Perguntas e ideias ainda sem formato vão para as Discussions. Issue é para
+trabalho que alguém pode pegar e terminar.
+
 ## Commits e pull requests
 
 - Mensagem em português, no formato `tipo(escopo): resumo` ou `tipo: resumo`.
