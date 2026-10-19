@@ -108,7 +108,7 @@ func assertOK(t *testing.T, results []Result, want ...bool) {
 func TestRunAllOK(t *testing.T) {
 	dir := t.TempDir()
 	iron := newFakeIron(t, dir, scriptDeny, 0o755)
-	path := writeSettings(t, dir, settingsWith(t, "Bash", iron))
+	path := writeSettings(t, dir, settingsWith(t, "Bash|PowerShell", iron))
 
 	results := Run(path, testVersion, testTimeout)
 
@@ -118,6 +118,27 @@ func TestRunAllOK(t *testing.T) {
 	}
 	if !AllOK(results) {
 		t.Error("AllOK deveria ser true")
+	}
+}
+
+// Um hook instalado por uma versão sem a PowerShell só pega a ferramenta Bash:
+// com a PowerShell o agente passa por cima dele, e sem o Git for Windows ela é
+// a única ferramenta. O doctor tem de dizer isso e como corrigir.
+func TestRunLegacyBashOnlyMatcherFails(t *testing.T) {
+	dir := t.TempDir()
+	iron := newFakeIron(t, dir, scriptDeny, 0o755)
+	path := writeSettings(t, dir, settingsWith(t, "Bash", iron))
+
+	results := Run(path, testVersion, testTimeout)
+
+	if results[0].OK {
+		t.Fatalf("a verificação do settings deveria falhar com o matcher antigo: %+v", results[0])
+	}
+	if !strings.Contains(results[0].Detail, "PowerShell") {
+		t.Errorf("o detalhe deveria citar a PowerShell: %q", results[0].Detail)
+	}
+	if !strings.Contains(results[0].Fix, fixIronInit) {
+		t.Errorf("a correção deveria citar %q: %q", fixIronInit, results[0].Fix)
 	}
 }
 
@@ -138,7 +159,7 @@ func TestRunMissingSettings(t *testing.T) {
 func TestRunWrongPath(t *testing.T) {
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "nao", "existe", "iron")
-	path := writeSettings(t, dir, settingsWith(t, "Bash", missing))
+	path := writeSettings(t, dir, settingsWith(t, "Bash|PowerShell", missing))
 
 	results := Run(path, testVersion, testTimeout)
 
@@ -187,7 +208,7 @@ func TestRunInvalidSettings(t *testing.T) {
 func TestRunBinaryNotExecutable(t *testing.T) {
 	dir := t.TempDir()
 	iron := newFakeIron(t, dir, scriptDeny, 0o644)
-	path := writeSettings(t, dir, settingsWith(t, "Bash", iron))
+	path := writeSettings(t, dir, settingsWith(t, "Bash|PowerShell", iron))
 
 	results := Run(path, testVersion, testTimeout)
 
@@ -208,7 +229,7 @@ func TestRunHookDoesNotBlock(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			dir := t.TempDir()
 			iron := newFakeIron(t, dir, c.script, 0o755)
-			path := writeSettings(t, dir, settingsWith(t, "Bash", iron))
+			path := writeSettings(t, dir, settingsWith(t, "Bash|PowerShell", iron))
 
 			timeout := testTimeout
 			if c.script == scriptHangs {
@@ -226,7 +247,7 @@ func TestRunDoesNotExecuteRelativePath(t *testing.T) {
 	t.Chdir(dir)
 	// Se este script rodar, ele deixa o arquivo "ran" na pasta atual.
 	newFakeIron(t, dir, "#!/bin/sh\ntouch ran\nexit 2\n", 0o755)
-	path := writeSettings(t, dir, settingsWith(t, "Bash", "./bin/iron"))
+	path := writeSettings(t, dir, settingsWith(t, "Bash|PowerShell", "./bin/iron"))
 
 	results := Run(path, testVersion, testTimeout)
 
@@ -240,7 +261,7 @@ func TestRunPrefersWorkingHookOverStaleOne(t *testing.T) {
 	dir := t.TempDir()
 	stale := filepath.Join(dir, "old", "iron")
 	iron := newFakeIron(t, dir, scriptDeny, 0o755)
-	path := writeSettings(t, dir, settingsWith(t, "Bash", stale, iron))
+	path := writeSettings(t, dir, settingsWith(t, "Bash|PowerShell", stale, iron))
 
 	results := Run(path, testVersion, testTimeout)
 
@@ -267,7 +288,7 @@ func settingsWithTimeout(t *testing.T, command string, timeout float64) string {
 	t.Helper()
 
 	data, err := json.Marshal(map[string]any{"hooks": map[string]any{"PreToolUse": []any{map[string]any{
-		"matcher": "Bash",
+		"matcher": "Bash|PowerShell",
 		"hooks":   []any{map[string]any{"type": "command", "command": command, "args": []any{"hook"}, "timeout": timeout}},
 	}}}})
 	if err != nil {
@@ -309,7 +330,7 @@ func TestRunHookTimeout(t *testing.T) {
 func TestRunHookTimeoutDefault(t *testing.T) {
 	dir := t.TempDir()
 	iron := newFakeIron(t, dir, scriptDeny, 0o755)
-	path := writeSettings(t, dir, settingsWith(t, "Bash", iron))
+	path := writeSettings(t, dir, settingsWith(t, "Bash|PowerShell", iron))
 
 	results := Run(path, testVersion, testTimeout)
 
@@ -394,7 +415,7 @@ func TestRunAllPutsAuditBeforeVersion(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // nenhum terraform: o resultado não depende da máquina
 	dir := t.TempDir()
 	iron := newFakeIron(t, dir, scriptDeny, 0o755)
-	path := writeSettings(t, dir, settingsWith(t, "Bash", iron))
+	path := writeSettings(t, dir, settingsWith(t, "Bash|PowerShell", iron))
 	log := audit.Log{Path: filepath.Join(dir, ".iron", "audit.log")}
 
 	results := RunAll(path, testVersion, testTimeout, Extra{Log: log, ConfigPath: filepath.Join(dir, "config.yaml"), ProjectDir: dir})
@@ -523,7 +544,7 @@ func TestRunAllWithCoverageAndTag(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	dir := t.TempDir()
 	iron := newFakeIron(t, dir, scriptDeny, 0o755)
-	path := writeSettings(t, dir, settingsWith(t, "Bash", iron))
+	path := writeSettings(t, dir, settingsWith(t, "Bash|PowerShell", iron))
 	log := audit.Log{Path: filepath.Join(dir, ".iron", "audit.log")}
 	now := time.Now()
 
@@ -549,7 +570,7 @@ func TestRunAllSkipsOptionalChecksByDefault(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	dir := t.TempDir()
 	iron := newFakeIron(t, dir, scriptDeny, 0o755)
-	path := writeSettings(t, dir, settingsWith(t, "Bash", iron))
+	path := writeSettings(t, dir, settingsWith(t, "Bash|PowerShell", iron))
 
 	results := RunAll(path, testVersion, testTimeout, Extra{Log: audit.Log{Path: filepath.Join(dir, ".iron", "audit.log")}, ConfigPath: filepath.Join(dir, "config.yaml"), ProjectDir: dir})
 
@@ -561,7 +582,7 @@ func TestRunAllSkipsOptionalChecksByDefault(t *testing.T) {
 func TestCheckSettingsExplainsARenamedBinary(t *testing.T) {
 	dir := t.TempDir()
 	renamed := filepath.Join(dir, "iron_linux_amd64")
-	path := writeSettings(t, dir, settingsWith(t, "Bash", renamed))
+	path := writeSettings(t, dir, settingsWith(t, "Bash|PowerShell", renamed))
 
 	got, hooks := checkSettings(path)
 

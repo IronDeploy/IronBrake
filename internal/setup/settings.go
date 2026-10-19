@@ -11,7 +11,14 @@ import (
 	"slices"
 )
 
-const ironMatcher = "Bash"
+// ironMatcher cobre as duas ferramentas de shell do Claude Code. Sem o Git for
+// Windows o agente só tem a PowerShell; com ele, tem as duas e o que o Bash
+// barra passaria pela PowerShell.
+const ironMatcher = "Bash|PowerShell"
+
+// legacyMatcher é o que as versões anteriores instalavam. O init o amplia no
+// lugar; o doctor avisa que ele não cobre a PowerShell.
+const legacyMatcher = "Bash"
 
 // HookSubcommand é o argumento de "iron hook".
 const HookSubcommand = "hook"
@@ -48,11 +55,23 @@ func InstallHook(settingsPath, exePath string) (bool, error) {
 		return false, nil
 	}
 
-	group, err := encode(matcherGroup{Matcher: ironMatcher, Hooks: []handler{ours}}, "")
-	if err != nil {
-		return false, err
+	groups := doc.groups
+	if i := legacyGroup(groups, ours); i >= 0 {
+		// Instalado por uma versão sem a PowerShell: amplia o matcher no lugar.
+		widened, err := widenMatcher(groups[i])
+		if err != nil {
+			return false, err
+		}
+		groups = slices.Clone(groups)
+		groups[i] = widened
+	} else {
+		group, err := encode(matcherGroup{Matcher: ironMatcher, Hooks: []handler{ours}}, "")
+		if err != nil {
+			return false, err
+		}
+		groups = append(slices.Clone(groups), group)
 	}
-	if doc.hooks["PreToolUse"], err = encode(append(doc.groups, group), ""); err != nil {
+	if doc.hooks["PreToolUse"], err = encode(groups, ""); err != nil {
 		return false, err
 	}
 	if doc.settings["hooks"], err = encode(doc.hooks, ""); err != nil {
@@ -121,22 +140,42 @@ func decodeObject(raw []byte) (map[string]json.RawMessage, error) {
 }
 
 func isInstalled(groups []json.RawMessage, ours handler) bool {
-	for _, raw := range groups {
+	return findGroup(groups, ours, ironMatcher) >= 0
+}
+
+// legacyGroup devolve o índice do nosso grupo com o matcher antigo, ou -1.
+func legacyGroup(groups []json.RawMessage, ours handler) int {
+	return findGroup(groups, ours, legacyMatcher)
+}
+
+// findGroup devolve o índice do primeiro grupo com esse matcher que tem o nosso
+// handler, ou -1.
+func findGroup(groups []json.RawMessage, ours handler, matcher string) int {
+	return slices.IndexFunc(groups, func(raw json.RawMessage) bool {
 		var group matcherGroup
-		if json.Unmarshal(raw, &group) != nil || group.Matcher != ironMatcher {
-			continue
+		if json.Unmarshal(raw, &group) != nil || group.Matcher != matcher {
+			return false
 		}
 
-		found := slices.ContainsFunc(group.Hooks, func(h handler) bool {
+		return slices.ContainsFunc(group.Hooks, func(h handler) bool {
 			// O caminho é comparado limpo: "x/../bin/iron" e "bin/iron" são o mesmo programa.
 			return h.Type == ours.Type && filepath.Clean(h.Command) == filepath.Clean(ours.Command) && slices.Equal(h.Args, ours.Args)
 		})
-		if found {
-			return true
-		}
+	})
+}
+
+// widenMatcher troca só o matcher do grupo; o resto (timeout e campos que
+// este código não conhece) fica como estava.
+func widenMatcher(raw json.RawMessage) (json.RawMessage, error) {
+	fields, err := decodeObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	if fields["matcher"], err = encode(ironMatcher, ""); err != nil {
+		return nil, err
 	}
 
-	return false
+	return encode(fields, "")
 }
 
 // encode não escapa <, > e & (o padrão do json.Marshal), para não reescrever

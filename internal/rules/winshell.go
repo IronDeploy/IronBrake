@@ -18,6 +18,12 @@ func winScript(text string) string {
 	return strings.ReplaceAll(text, `\`, "/")
 }
 
+// PowerShellText prepara o texto da ferramenta PowerShell do agente para a
+// análise: o mesmo ajuste que o invólucro "powershell -Command" recebe.
+func PowerShellText(text string) string {
+	return winScript(text)
+}
+
 // cmdScript devolve o comando de "cmd /c COMANDO" (também /k e /r). Tudo
 // depois do /c é o comando, mesmo sem aspas.
 func cmdScript(args []string) (string, bool) {

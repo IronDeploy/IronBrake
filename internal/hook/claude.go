@@ -18,6 +18,13 @@ func (claudeAgent) Capabilities() Capabilities {
 	return Capabilities{CanAsk: true, Timeout: 600 * time.Second, AppID: "iron-claude"}
 }
 
+// Ferramentas de shell do Claude Code. Sem o Git for Windows o agente só tem a
+// PowerShell, então o hook precisa pegar as duas.
+const (
+	claudeBashTool       = "Bash"
+	claudePowerShellTool = "PowerShell"
+)
+
 // claudeEvent é o JSON que o Claude Code envia pelo stdin antes de executar
 // uma ferramenta (só os campos usados).
 type claudeEvent struct {
@@ -38,11 +45,12 @@ func (claudeAgent) ParseEvent(stdin io.Reader) (Event, error) {
 		return Event{}, err
 	}
 	return Event{
-		Command:   in.ToolInput.Command,
-		Tool:      in.ToolName,
-		Shell:     in.ToolName == "" || in.ToolName == "Bash",
-		SessionID: in.SessionID,
-		Cwd:       in.Cwd,
+		Command:    in.ToolInput.Command,
+		Tool:       in.ToolName,
+		Shell:      in.ToolName == "" || in.ToolName == claudeBashTool || in.ToolName == claudePowerShellTool,
+		PowerShell: in.ToolName == claudePowerShellTool,
+		SessionID:  in.SessionID,
+		Cwd:        in.Cwd,
 	}, nil
 }
 

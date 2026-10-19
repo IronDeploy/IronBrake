@@ -67,7 +67,7 @@ func decode(t *testing.T, data []byte) map[string]any {
 
 func wantIronGroup() map[string]any {
 	return map[string]any{
-		"matcher": "Bash",
+		"matcher": "Bash|PowerShell",
 		"hooks": []any{
 			map[string]any{"type": "command", "command": testExe, "args": []any{"hook"}},
 		},
@@ -152,6 +152,60 @@ func TestInstallHookTwiceDoesNotDuplicate(t *testing.T) {
 				t.Errorf("segunda execução mudou o arquivo:\n%s", afterSecond)
 			}
 		})
+	}
+}
+
+// Quem instalou antes da ferramenta PowerShell tem o matcher "Bash". O init
+// troca o matcher do nosso grupo no lugar: um segundo grupo faria o hook rodar
+// duas vezes a cada comando Bash.
+func TestInstallHookUpgradesTheLegacyMatcherInPlace(t *testing.T) {
+	legacy := `{"hooks":{"PreToolUse":[
+		{"matcher":"Write","hooks":[{"type":"command","command":"./fmt.sh"}]},
+		{"matcher":"Bash","hooks":[{"type":"command","command":"` + testExe + `","args":["hook"],"timeout":600}]}
+	]}}`
+	path := newSettingsPath(t, legacy)
+
+	changed, err := InstallHook(path, testExe)
+
+	if err != nil {
+		t.Fatalf("erro inesperado: %v", err)
+	}
+	if !changed {
+		t.Error("esperava changed=true ao ampliar o matcher")
+	}
+	groups := decode(t, readFile(t, path))["hooks"].(map[string]any)["PreToolUse"].([]any)
+	if len(groups) != 2 {
+		t.Fatalf("esperava 2 grupos (o Write e o nosso, no mesmo lugar), obtive %d: %v", len(groups), groups)
+	}
+	if groups[0].(map[string]any)["matcher"] != "Write" {
+		t.Errorf("o grupo de terceiros mudou: %v", groups[0])
+	}
+	ours := groups[1].(map[string]any)
+	if ours["matcher"] != "Bash|PowerShell" {
+		t.Errorf("matcher: esperava %q, obtive %v", "Bash|PowerShell", ours["matcher"])
+	}
+	if h := ours["hooks"].([]any)[0].(map[string]any); h["timeout"] != float64(600) {
+		t.Errorf("o timeout do hook existente se perdeu: %v", h)
+	}
+
+	changed, err = InstallHook(path, testExe)
+	if err != nil || changed {
+		t.Errorf("segunda execução: changed=%v err=%v; esperava changed=false", changed, err)
+	}
+}
+
+// O matcher "Bash" de um hook que não é o nosso não é mexido.
+func TestInstallHookLeavesAnotherBashHookAlone(t *testing.T) {
+	other := `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"./lint.sh"}]}]}}`
+	path := newSettingsPath(t, other)
+
+	if _, err := InstallHook(path, testExe); err != nil {
+		t.Fatalf("erro inesperado: %v", err)
+	}
+
+	groups := decode(t, readFile(t, path))["hooks"].(map[string]any)["PreToolUse"].([]any)
+	if len(groups) != 2 || groups[0].(map[string]any)["matcher"] != "Bash" || groups[1].(map[string]any)["matcher"] != "Bash|PowerShell" {
+		t.Errorf("esperava o grupo de terceiros intacto e o nosso depois: %v", groups)
 	}
 }
 

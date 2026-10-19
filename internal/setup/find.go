@@ -28,6 +28,7 @@ func SettingsPath(dir string) string {
 type Hook struct {
 	Command string
 	Timeout float64 // segundos
+	Matcher string  // "Bash|PowerShell" (atual) ou "Bash" (versões antigas)
 }
 
 // FindHooks devolve os hooks do Iron Brake em settingsPath. Sem arquivo, o
@@ -41,18 +42,25 @@ func FindHooks(settingsPath string) ([]Hook, error) {
 	var hooks []Hook
 	for _, raw := range doc.groups {
 		var group matcherGroup
-		if json.Unmarshal(raw, &group) != nil || group.Matcher != ironMatcher {
+		if json.Unmarshal(raw, &group) != nil || !isIronMatcher(group.Matcher) {
 			continue
 		}
 
 		for _, h := range group.Hooks {
 			if isIronHandler(h) {
-				hooks = append(hooks, Hook{Command: h.Command, Timeout: h.Timeout})
+				hooks = append(hooks, Hook{Command: h.Command, Timeout: h.Timeout, Matcher: group.Matcher})
 			}
 		}
 	}
 
 	return hooks, nil
+}
+
+// isIronMatcher aceita o matcher atual e o das versões anteriores, para o
+// doctor e o status enxergarem uma instalação antiga (e dizerem que ela não
+// cobre a PowerShell) em vez de dizer que não há hook.
+func isIronMatcher(matcher string) bool {
+	return matcher == ironMatcher || matcher == legacyMatcher
 }
 
 func isIronHandler(h handler) bool {
@@ -75,7 +83,7 @@ func FindRenamedHooks(settingsPath string) ([]string, error) {
 	var commands []string
 	for _, raw := range doc.groups {
 		var group matcherGroup
-		if json.Unmarshal(raw, &group) != nil || group.Matcher != ironMatcher {
+		if json.Unmarshal(raw, &group) != nil || !isIronMatcher(group.Matcher) {
 			continue
 		}
 		for _, h := range group.Hooks {

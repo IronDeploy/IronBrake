@@ -170,6 +170,26 @@ func TestCollectWarnings(t *testing.T) {
 	}
 }
 
+// Instalação de uma versão sem a PowerShell: o hook existe, mas só pega a ferramenta Bash.
+func TestCollectLegacyMatcherWarnsAboutPowerShell(t *testing.T) {
+	dir := t.TempDir()
+	in := input(t, dir)
+	exe := fakeIron(t)
+	legacy := `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"` + exe + `","args":["hook"]}]}]}}`
+	if err := os.MkdirAll(filepath.Dir(setup.SettingsPath(dir)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(setup.SettingsPath(dir), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	claude := byName(Collect(in), "claude")
+
+	if !claude.Installed || len(claude.Warnings) != 1 || !strings.Contains(claude.Warnings[0], "PowerShell") || !strings.Contains(claude.Warnings[0], "iron init") {
+		t.Errorf("claude com matcher antigo deveria avisar da PowerShell e de iron init: %+v", claude)
+	}
+}
+
 func TestCollectMissingBinaryWarns(t *testing.T) {
 	dir := t.TempDir()
 	in := input(t, dir)

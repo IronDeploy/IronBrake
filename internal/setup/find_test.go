@@ -69,7 +69,7 @@ func TestFindHooks(t *testing.T) {
 				{"matcher":"Bash","hooks":[{"type":"command","command":"/old/iron","args":["hook"]}]},
 				{"matcher":"Bash","hooks":[{"type":"command","command":"/new/iron","args":["hook"],"timeout":30}]}
 			]}}`,
-			[]Hook{{Command: "/old/iron"}, {Command: "/new/iron", Timeout: 30}},
+			[]Hook{{Command: "/old/iron", Matcher: "Bash"}, {Command: "/new/iron", Timeout: 30, Matcher: "Bash"}},
 		},
 	}
 
@@ -100,7 +100,7 @@ func TestFindHooksRecognizesWhatInitInstalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("erro inesperado: %v", err)
 	}
-	if want := []Hook{{Command: testExe}}; !reflect.DeepEqual(got, want) {
+	if want := []Hook{{Command: testExe, Matcher: "Bash|PowerShell"}}; !reflect.DeepEqual(got, want) {
 		t.Errorf("esperava %v, obtive %v", want, got)
 	}
 }
@@ -153,5 +153,24 @@ func TestFindRenamedHooks(t *testing.T) {
 
 	if _, err := FindRenamedHooks(filepath.Join(t.TempDir(), "nao-existe.json")); err == nil {
 		t.Error("sem arquivo deve dar erro")
+	}
+}
+
+func TestFindHooksReportsTheMatcher(t *testing.T) {
+	cases := []struct {
+		matcher string
+		want    string
+	}{
+		{"Bash", "Bash"},
+		{"Bash|PowerShell", "Bash|PowerShell"},
+	}
+	for _, c := range cases {
+		path := newSettingsPath(t, `{"hooks":{"PreToolUse":[{"matcher":"`+c.matcher+`","hooks":[{"type":"command","command":"/x/iron","args":["hook"]}]}]}}`)
+
+		hooks, err := FindHooks(path)
+
+		if err != nil || len(hooks) != 1 || hooks[0].Matcher != c.want {
+			t.Errorf("matcher %q: hooks=%v err=%v", c.matcher, hooks, err)
+		}
 	}
 }

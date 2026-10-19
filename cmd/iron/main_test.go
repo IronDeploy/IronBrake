@@ -104,6 +104,10 @@ func TestRunHook(t *testing.T) {
 		{"git-status.json", 0},
 		{"read-tool.json", 0},
 		{"git-push-force.json", 2},
+		// Ferramenta PowerShell (eventos reais do Claude Code no Windows): o
+		// mesmo force push é barrado, e o inofensivo passa.
+		{"claude/powershell-git-push-force.json", 2},
+		{"claude/powershell-write-output.json", 0},
 		// terraform apply sem plano salvo: deny.
 		{"terraform-apply.json", 2},
 		// terraform apply com plano que só cria: allow.
@@ -127,6 +131,44 @@ func TestRunHook(t *testing.T) {
 			// deny escreve o motivo no stderr; allow é silencioso.
 			if (c.wantCode == 2) != (stderr.Len() > 0) {
 				t.Errorf("stderr inesperado para o código %d: %q", c.wantCode, stderr.String())
+			}
+		})
+	}
+}
+
+// A barra invertida de "C:\dados" é separador de pasta na PowerShell; no
+// tokenizador do shell POSIX ela seria um escape e o caminho viraria "C:dados".
+func TestRunHookPowerShellToolRemoveItemOutsideTheProject(t *testing.T) {
+	cases := []struct {
+		command string
+		allowed bool
+	}{
+		{`Remove-Item -Recurse -Force C:\dados\prod`, false},
+		{`Remove-Item C:\dados\prod -Recurse`, false},
+		{`Remove-Item -Recurse -Force -Path C:\dados\prod`, false},
+		{`git push --force origin main`, false},
+		// Parecidos e inofensivos: continuam liberados.
+		{`Remove-Item C:\dados\prod\arquivo.txt`, true},
+		{`Remove-Item -Recurse -Force .\build`, true},
+		{`Get-ChildItem C:\dados\prod -Recurse`, true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.command, func(t *testing.T) {
+			event, err := json.Marshal(map[string]any{
+				"tool_name":  "PowerShell",
+				"cwd":        `C:\Users\exemplo\proj`,
+				"tool_input": map[string]string{"command": c.command},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+
+			code := runHook(bytes.NewReader(event), &stdout, &stderr, testDeps())
+
+			if allowed := code == 0 && stdout.Len() == 0; allowed != c.allowed {
+				t.Errorf("liberado=%v, esperava %v (código %d, stdout %q, stderr %q)", allowed, c.allowed, code, stdout.String(), stderr.String())
 			}
 		})
 	}

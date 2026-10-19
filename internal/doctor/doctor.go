@@ -22,6 +22,9 @@ import (
 	"github.com/IronDeploy/IronBrake/internal/watch"
 )
 
+// claudePowerShellTool é o nome que o Claude Code dá à ferramenta PowerShell.
+const claudePowerShellTool = "PowerShell"
+
 const testEvent = `{"tool_name":"Bash","tool_input":{"command":"git push --force origin main"}}`
 
 const (
@@ -316,12 +319,22 @@ func checkSettings(settingsPath string) (Result, []setup.Hook) {
 		}
 		result.Detail = "o arquivo existe, mas não tem o hook do Iron Brake"
 		result.Fix = "rode iron init para adicionar o hook sem apagar o resto do arquivo."
+	case !coversPowerShell(hooks):
+		result.Detail = fmt.Sprintf("o hook de %s só pega a ferramenta Bash (matcher %q): comandos pela ferramenta PowerShell do Claude Code passam sem análise, e sem o Git for Windows ela é a única que o agente usa", settingsPath, hooks[0].Matcher)
+		result.Fix = "rode iron init na raiz do projeto: ele amplia o matcher do hook existente para Bash|PowerShell, sem duplicar."
 	default:
 		result.OK = true
 		result.Detail = fmt.Sprintf("%d hook(s) em %s", len(hooks), settingsPath)
 	}
 
 	return result, hooks
+}
+
+// coversPowerShell diz se algum hook pega a ferramenta PowerShell do Claude Code.
+func coversPowerShell(hooks []setup.Hook) bool {
+	return slices.ContainsFunc(hooks, func(h setup.Hook) bool {
+		return setup.MatcherCovers(h.Matcher, claudePowerShellTool)
+	})
 }
 
 // pickHook prefere o primeiro hook cujo binário funciona.

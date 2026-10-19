@@ -200,6 +200,9 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer, deps hookDeps) int {
 
 func decide(event hook.Event, deps hookDeps) (verdict, []audit.Resource, policy.AuditLog) {
 	command := event.Command
+	if event.PowerShell {
+		command = rules.PowerShellText(command)
+	}
 	env := deps.loadEnv(event.Cwd)
 
 	checked := rules.Evaluate(command, env)
