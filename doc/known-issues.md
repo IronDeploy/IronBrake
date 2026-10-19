@@ -141,12 +141,24 @@ Limites:
   abrindo a janela (só as opções foram conferidas), vários monitores, um clique
   humano (os cliques foram do `xdotool`) e o Claude Code no Linux.
 
-## 4. Linha com plan e apply juntos é bloqueada (verificado)
+## 4. Linha com plan e apply juntos é bloqueada (decisão mantida)
 
-`terraform plan -out=novo.tfplan && terraform apply novo.tfplan` → deny
-("não consegui ler o plano salvo"), porque o plano ainda não existe quando o
-hook roda. É seguro, mas obriga a separar em dois comandos. A mensagem orienta
-isso.
+`terraform plan -out=novo.tfplan && terraform apply novo.tfplan` → deny. Duas
+razões, e a segunda não aparecia antes:
+
+- O plano ainda não existe quando o hook roda, então não há como mostrar o que
+  o apply vai criar, alterar ou apagar.
+- Se já existir um `novo.tfplan` antigo no disco, ler esse arquivo analisaria
+  um plano que **não** é o que o apply vai aplicar (o `plan -out` o
+  sobrescreve). Antes, nesse caso o apply era liberado pelo plano velho; agora
+  a linha é barrada sempre que um `plan -out=X` seguido de `apply X` (mesmo
+  `-chdir`) aparece nela, com ou sem o arquivo no disco.
+
+Por que não `ask`: a janela mostraria um cartão sem os recursos, e quem aprova
+decidiria sem ver o que muda. A mensagem agora diz exatamente como separar:
+`terraform plan -out=X` num comando, conferir, e `terraform apply X` em outro.
+Apply de **outro** plano na mesma linha (`plan -out=a && apply b`) segue a regra
+normal e lê o `b`.
 
 ## 5. `cd` na mesma linha é bloqueado
 

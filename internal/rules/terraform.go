@@ -13,6 +13,7 @@ import (
 
 const (
 	applyWithoutPlanReason = "Iron Brake: terraform apply sem plano salvo bloqueado. rode terraform plan -out=tfplan primeiro e depois terraform apply tfplan. Sem o plano, o apply pode criar, alterar ou apagar recursos sem que ninguém tenha visto o que vai mudar."
+	freshPlanReason        = "Iron Brake: terraform apply do plano que a mesma linha acabou de gerar bloqueado: o plano ainda não existe quando o hook analisa, e um plano antigo com o mesmo nome seria lido no lugar do novo. rode terraform plan -out=%[1]s em um comando, confira o que ele mostra e rode terraform apply %[1]s em outro. Sem isso ninguém vê o que o apply vai criar, alterar ou apagar."
 	unreadablePlanReason   = "Iron Brake: não consegui ler o plano salvo. rode terraform plan -out=tfplan em um comando separado e depois terraform apply tfplan. Sem ler o plano, não dá para saber se o apply apaga ou substitui recursos."
 	applyAfterCdReason     = "Iron Brake: terraform apply depois de cd na mesma linha bloqueado: não dá para saber qual plano será aplicado. use terraform -chdir=PASTA apply tfplan. Aplicar o plano de outra pasta pode apagar ou alterar recursos que ninguém revisou."
 	criticalInProdReason   = "Iron Brake: bloqueado: o plano apaga ou substitui recurso crítico em produção. peça ao usuário para executar. Se rodar, um banco de dados, cluster ou outro recurso crítico de produção pode ser apagado, com perda de dados e serviço fora do ar."
@@ -76,9 +77,10 @@ func InspectTerraformApply(command, cwd string, env Env, readPlan PlanReader) Ap
 	changedDir := false
 	commands := splitCommands(command)
 	production := env.isProduction(commands)
+	written := map[string]bool{} // planos que um "plan -out" desta linha vai gravar
 
 	for _, tokens := range commands {
-		d, r, summary := checkApply(tokens, cwd, changedDir, production, env, readPlan)
+		d, r, summary := checkApply(tokens, cwd, changedDir, production, written, env, readPlan)
 		if summary != nil {
 			result.Applies++
 			result.Resources += summary.Changed()
@@ -94,9 +96,37 @@ func InspectTerraformApply(command, cwd string, env Env, readPlan PlanReader) Ap
 		if isChangeDir(tokens) {
 			changedDir = true
 		}
+		if chdir, file, ok := parsePlanOut(tokens); ok {
+			written[planKey(chdir, file)] = true
+		}
 	}
 
 	return result
+}
+
+// planKey identifica um arquivo de plano: o mesmo nome em outro -chdir é outro arquivo.
+func planKey(chdir, file string) string { return chdir + "\x00" + file }
+
+// parsePlanOut devolve o -chdir e o arquivo de "terraform plan -out=ARQUIVO"
+// (ou "-out ARQUIVO"), o plano que esse comando vai gravar.
+func parsePlanOut(tokens []string) (chdir, file string, ok bool) {
+	sub, chdir, args := terraformSubcommand(tokens)
+	if sub != "plan" {
+		return "", "", false
+	}
+	for i, arg := range args {
+		flag, value, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+		if !strings.HasPrefix(arg, "-") || flag != "out" {
+			continue
+		}
+		switch {
+		case hasValue && value != "":
+			return chdir, value, true
+		case !hasValue && i+1 < len(args):
+			return chdir, args[i+1], true
+		}
+	}
+	return "", "", false
 }
 
 func isChangeDir(tokens []string) bool {
@@ -108,7 +138,7 @@ func isChangeDir(tokens []string) bool {
 }
 
 // checkApply devolve também o resumo do plano, se conseguiu lê-lo.
-func checkApply(tokens []string, cwd string, changedDir, production bool, env Env, readPlan PlanReader) (hook.Decision, string, *tfplan.Summary) {
+func checkApply(tokens []string, cwd string, changedDir, production bool, written map[string]bool, env Env, readPlan PlanReader) (hook.Decision, string, *tfplan.Summary) {
 	call, isApply := parseTerraformApply(tokens)
 	if !isApply {
 		return hook.Allow, "", nil
@@ -119,6 +149,11 @@ func checkApply(tokens []string, cwd string, changedDir, production bool, env En
 	// Depois de um cd, leríamos o plano da pasta errada.
 	if changedDir {
 		return hook.Deny, forTool(applyAfterCdReason, call.Tool), nil
+	}
+	// O arquivo é gravado por esta mesma linha: o que está no disco agora, se
+	// houver, é outro plano.
+	if written[planKey(call.Chdir, call.PlanFile)] {
+		return hook.Deny, fmt.Sprintf(forTool(freshPlanReason, call.Tool), call.PlanFile), nil
 	}
 
 	call.Cwd = cwd
