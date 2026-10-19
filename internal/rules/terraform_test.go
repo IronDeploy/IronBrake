@@ -155,6 +155,62 @@ func TestApplyMessagesNameTheTool(t *testing.T) {
 	}
 }
 
+// plan -out=X && apply X na mesma linha: o plano ainda não existe quando o hook
+// analisa. Pior: se já existir um X antigo no disco, ler esse X analisaria um
+// plano que não é o que o apply vai aplicar. Por isso vale deny mesmo com o
+// arquivo presente (create.tfplan existe no fakeReadPlan).
+func TestTerraformApplyOfThePlanTheSameLineJustWrote(t *testing.T) {
+	cases := []struct {
+		name    string
+		command string
+		want    hook.Decision
+	}{
+		{"-out=X e apply X", `terraform plan -out=create.tfplan && terraform apply create.tfplan`, hook.Deny},
+		{"-out X separado", `terraform plan -out create.tfplan && terraform apply create.tfplan`, hook.Deny},
+		{"com ; e -auto-approve", `terraform plan -out=create.tfplan; terraform apply -auto-approve create.tfplan`, hook.Deny},
+		{"plano que não existe", `terraform plan -out=novo.tfplan && terraform apply novo.tfplan`, hook.Deny},
+		{"tofu", `tofu plan -out=create.tfplan && tofu apply create.tfplan`, hook.Deny},
+		{"-chdir igual nos dois", `terraform -chdir=infra plan -out=create.tfplan && terraform -chdir=infra apply create.tfplan`, hook.Deny},
+
+		// Parecidos e inofensivos: continuam como antes.
+		{"apply de outro plano, já salvo", `terraform plan -out=novo.tfplan && terraform apply create.tfplan`, hook.Allow},
+		{"-chdir diferente: não é o mesmo arquivo", `terraform -chdir=a plan -out=create.tfplan && terraform -chdir=b apply create.tfplan`, hook.Allow},
+		{"apply antes do plan", `terraform apply create.tfplan && terraform plan -out=create.tfplan`, hook.Allow},
+		{"plan sem -out", `terraform plan && terraform apply create.tfplan`, hook.Allow},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, reason := CheckTerraformApply(c.command, "/projeto", devEnv, fakeReadPlan(new(string)))
+
+			if got != c.want {
+				t.Errorf("decisão: esperava %q, obtive %q (motivo: %q)", c.want, got, reason)
+			}
+		})
+	}
+}
+
+func TestTerraformApplyOfThePlanTheSameLineJustWroteMessage(t *testing.T) {
+	_, reason := CheckTerraformApply(`terraform plan -out=tfplan && terraform apply tfplan`, "/projeto", devEnv, fakeReadPlan(new(string)))
+
+	want := "Iron Brake: terraform apply do plano que a mesma linha acabou de gerar bloqueado: o plano ainda não existe quando o hook analisa, e um plano antigo com o mesmo nome seria lido no lugar do novo. rode terraform plan -out=tfplan em um comando, confira o que ele mostra e rode terraform apply tfplan em outro. Sem isso ninguém vê o que o apply vai criar, alterar ou apagar."
+	if reason != want {
+		t.Errorf("motivo:\nesperava %q\nobtive    %q", want, reason)
+	}
+}
+
+// O nome da ferramenta no motivo vem de forTool; o do arquivo de plano, não:
+// terraform.tfplan num apply do tofu continua terraform.tfplan.
+func TestFreshPlanMessageKeepsThePlanFileName(t *testing.T) {
+	_, reason := CheckTerraformApply(`tofu plan -out=terraform.tfplan && tofu apply terraform.tfplan`, "/projeto", devEnv, fakeReadPlan(new(string)))
+
+	for _, want := range []string{"rode tofu plan -out=terraform.tfplan em um comando", "rode tofu apply terraform.tfplan em outro"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("o motivo deveria conter %q:\n%s", want, reason)
+		}
+	}
+}
+
 func TestTerraformApplyWithCdMessage(t *testing.T) {
 	_, reason := CheckTerraformApply(`cd infra && terraform apply tfplan`, "/projeto", devEnv, fakeReadPlan(new(string)))
 
