@@ -1,7 +1,7 @@
 name: Falso positivo
 description: Um comando seguro que foi barrado ou pediu confirmação sem necessidade
 title: "falso positivo: "
-labels: ["falso-positivo"]
+labels: ["falso-positivo", "precisa-triagem"]
 body:
   - type: markdown
     attributes:

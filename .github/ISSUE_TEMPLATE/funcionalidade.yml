@@ -1,7 +1,7 @@
 name: Funcionalidade
 description: Sugerir algo novo ou uma melhoria
 title: "feat: "
-labels: ["enhancement"]
+labels: ["enhancement", "precisa-triagem"]
 body:
   - type: markdown
     attributes:

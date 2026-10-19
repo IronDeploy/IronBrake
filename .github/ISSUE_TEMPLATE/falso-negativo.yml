@@ -1,7 +1,7 @@
 name: Falso negativo
 description: Um comando que passou e deveria ter sido barrado
 title: "falso negativo: "
-labels: ["falso-negativo"]
+labels: ["falso-negativo", "precisa-triagem"]
 body:
   - type: markdown
     attributes:
