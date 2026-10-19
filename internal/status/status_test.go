@@ -2,6 +2,7 @@ package status
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -175,11 +176,18 @@ func TestCollectLegacyMatcherWarnsAboutPowerShell(t *testing.T) {
 	dir := t.TempDir()
 	in := input(t, dir)
 	exe := fakeIron(t)
-	legacy := `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"` + exe + `","args":["hook"]}]}]}}`
+	// json.Marshal: no Windows o caminho tem "\", que colado numa string JSON viraria escape inválido.
+	legacy, err := json.Marshal(map[string]any{"hooks": map[string]any{"PreToolUse": []any{map[string]any{
+		"matcher": "Bash",
+		"hooks":   []any{map[string]any{"type": "command", "command": exe, "args": []any{"hook"}}},
+	}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Dir(setup.SettingsPath(dir)), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(setup.SettingsPath(dir), []byte(legacy), 0o644); err != nil {
+	if err := os.WriteFile(setup.SettingsPath(dir), legacy, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
