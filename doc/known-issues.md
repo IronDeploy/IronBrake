@@ -73,12 +73,45 @@ O que **ainda** sai com **código 0**:
 | nuvem | exclusão via SDK montada em variável ou vinda de outro arquivo que o script importa; API chamada por outro cliente que não seja `curl`/`wget` | é lido o código escrito na linha (`python3 -c`, heredoc, pipe) e o arquivo executado (`python3 deploy.py`): `.delete_*`, `.terminate_*`, `requests.delete(`, `method: 'DELETE'`, `shutil.rmtree`, `fs.rmSync`, `DROP`/`DELETE` sem filtro dentro de textos. `curl`/`wget` com `-X DELETE`, `Action=Delete*/Terminate*`, `X-Amz-Target: ...Delete*` ou `X-HTTP-Method-Override: DELETE` |
 
 O `terragrunt apply` segue a mesma regra do terraform ("sem plano, sem apply"): o
-plano é lido com `terragrunt show -json PLANO` (também `run-all` e `run --all --`,
-somando os planos dos módulos) e o cartão de risco vale igual. **Ainda não foi
-testado com o terragrunt de verdade** (só com um programa falso no lugar dele, nos
-testes): confirme com um `plan -out` real antes de confiar. No `run-all`, os
-módulos não aparecem no comando, então a detecção de produção só vale pelo
-contexto (perfil, workspace, `--working-dir`).
+plano é lido com `terragrunt show -json PLANO` (também `run --all --`, somando
+os planos dos módulos) e o cartão de risco vale igual. **Verificado em
+2026-10-21 com o terragrunt 1.1.6 e o terraform 1.16.4 de verdade** (módulos
+`terraform_data`, que não precisam de nuvem), inclusive com o Claude Code:
+
+- **`plan -out` e `apply` do plano:** plano só de criação passa (allow, sem
+  janela); substituição fora de produção abre a janela com o cartão (recurso
+  real, `terraform_data.app`); em produção é deny, sem janela.
+- **`run --all -- apply tfplan`:** os planos dos módulos são somados (cartão
+  `Substituir: 2` com os dois recursos). Com a pasta do agente em `live/prod`
+  é deny; em `live/dev`, janela.
+- **Produção:** detectada pelo caminho da pasta do agente, por
+  `--working-dir`, `--terragrunt-working-dir` (antes ou depois do subcomando),
+  por `cd ./PASTA` literal e pelo contexto (`TF_WORKSPACE`, `AWS_PROFILE`).
+- **Depois de Executar na janela**, no modo padrão do Claude Code (sem auto
+  mode), o apply roda direto: o Claude Code não pergunta de novo.
+- **Avisos dentro da janela:** além do cartão, ela traz o aviso de loop (o
+  mesmo comando 3 vezes em 5 minutos) e o do limite por sessão (applies e
+  recursos alterados), com **Cancelar** como botão padrão.
+- **O plano fica no cache:** o terragrunt grava o `tfplan` em
+  `.terragrunt-cache/<hash>/<hash>/`, não na pasta da unidade; o `show -json`
+  o encontra assim mesmo.
+
+Limites:
+
+- **`run-all`, `apply-all` e `destroy-all` só existem no terragrunt 0.x.** No
+  1.x o comando nem existe (`unknown command: "run-all"`); o Iron Brake nega com
+  "não consegui ler o plano salvo" (seguro, mas a mensagem não explica a causa).
+  Os testes dessas formas continuam só com programa falso.
+- **`run --all` exige o `--`** no 1.x (`run --all -- plan -out=tfplan`); sem ele
+  o próprio terragrunt recusa o `-out`.
+- **`run --all` a partir de uma pasta acima das unidades é só ask, não deny
+  (verificado em 2026-10-21):** de `live/` (sem `prod` no caminho), com
+  `live/prod/app` e `live/prod/db` substituindo um recurso crítico, o
+  `terragrunt run --all -- apply tfplan` abre a janela com `Substituir: 2` em vez
+  de bloquear. A produção vem do caminho da pasta do agente, do comando e do
+  contexto, não dos módulos que o terragrunt percorre, e o cartão não diz de
+  qual unidade vem cada recurso. Contorno: rodar a partir de `live/prod` ou
+  usar `--working-dir live/prod`, ou conferir o cartão antes de clicar.
 
 Qualquer regra também escapa por variável no lugar do comando e por scripts
 (seção 1). Prefixos (`sudo`, `env`, `sh -c`, `eval`...) **não** escapam: são
