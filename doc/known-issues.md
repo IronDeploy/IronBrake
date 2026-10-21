@@ -104,9 +104,14 @@ Limites:
   Os testes dessas formas continuam só com programa falso.
 - **`run --all` exige o `--`** no 1.x (`run --all -- plan -out=tfplan`); sem ele
   o próprio terragrunt recusa o `-out`.
-- **`run --all` a partir de uma pasta acima das unidades** (`live/`, sem `prod`
-  no caminho) não foi testado: a produção vem do caminho da pasta, do comando
-  e do contexto, não dos módulos que o terragrunt vai percorrer.
+- **`run --all` a partir de uma pasta acima das unidades é só ask, não deny
+  (verificado em 2026-10-21):** de `live/` (sem `prod` no caminho), com
+  `live/prod/app` e `live/prod/db` substituindo um recurso crítico, o
+  `terragrunt run --all -- apply tfplan` abre a janela com `Substituir: 2` em vez
+  de bloquear. A produção vem do caminho da pasta do agente, do comando e do
+  contexto, não dos módulos que o terragrunt percorre, e o cartão não diz de
+  qual unidade vem cada recurso. Contorno: rodar a partir de `live/prod` ou
+  usar `--working-dir live/prod`, ou conferir o cartão antes de clicar.
 
 Qualquer regra também escapa por variável no lugar do comando e por scripts
 (seção 1). Prefixos (`sudo`, `env`, `sh -c`, `eval`...) **não** escapam: são
