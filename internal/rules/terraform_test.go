@@ -245,7 +245,7 @@ func TestTerraformApplyReadsPlanInFolderOfLiteralCd(t *testing.T) {
 			return fakeReadPlan(new(string))(req)
 		}
 		d, _ := CheckTerraformApply(c.command, c.cwd, devEnv, readPlan)
-		if d != hook.Allow || gotCwd != c.want {
+		if d != hook.Allow || gotCwd != filepath.FromSlash(c.want) {
 			t.Errorf("%s: decisão %v, pasta %q; esperava allow em %q", c.command, d, gotCwd, c.want)
 		}
 	}
