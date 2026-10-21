@@ -42,13 +42,7 @@ func (e Env) workspaceTexts(commands [][]string) []string {
 // changeDir aplica um cd (ou pushd) à pasta atual, se o destino for um texto
 // simples. Opções (-P, -L) são puladas.
 func changeDir(dir string, known bool, args []string) (string, bool) {
-	var target string
-	for _, a := range args {
-		if !strings.HasPrefix(a, "-") || a == "-" {
-			target = a
-			break
-		}
-	}
+	target := cdTarget(args)
 	if target == "" || target == "-" || strings.HasPrefix(target, "~") || strings.ContainsAny(target, "$`*?[") {
 		return dir, false
 	}
@@ -59,6 +53,31 @@ func changeDir(dir string, known bool, args []string) (string, bool) {
 		return dir, false
 	}
 	return filepath.Join(dir, target), true
+}
+
+// cdTarget é o destino de um cd: o primeiro argumento que não é opção.
+func cdTarget(args []string) string {
+	for _, a := range args {
+		if !strings.HasPrefix(a, "-") || a == "-" {
+			return a
+		}
+	}
+	return ""
+}
+
+// searchedInCDPath diz se o shell poderia procurar o destino nas pastas do
+// CDPATH (que o hook não tem como ver por inteiro, p. ex. se vem do rc do
+// shell): destino relativo que não começa por ./ nem ../.
+func searchedInCDPath(target string) bool {
+	if target == "" || pathx.IsAbs(target) || strings.HasPrefix(target, "~") || target == "." || target == ".." {
+		return false
+	}
+	for _, prefix := range []string{"./", "../", `.\`, `..\`} {
+		if strings.HasPrefix(target, prefix) {
+			return false
+		}
+	}
+	return true
 }
 
 // workspaceDir junta a pasta atual e o -chdir do comando.

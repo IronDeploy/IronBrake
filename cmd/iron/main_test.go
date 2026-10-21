@@ -863,7 +863,9 @@ func TestRunHookReadsPlanOnlyWhenNeeded(t *testing.T) {
 		{"terraform plan -out=create.tfplan", 0},
 		{"terraform apply -auto-approve", 0},                     // sem plano: deny sem ler nada
 		{"terraform destroy", 0},                                 // deny pelo registro, antes do apply
-		{"cd infra && terraform apply create.tfplan", 0},         // deny pelo cd, antes de ler
+		{"cd ~/infra && terraform apply create.tfplan", 0},       // deny pelo cd que não se resolve, antes de ler
+		{"cd infra; terraform apply create.tfplan", 0},           // deny: só && liga o cd ao apply
+		{"cd ./infra && terraform apply create.tfplan", 1},       // cd literal: lê o plano da pasta do cd
 		{"git push --force && terraform apply create.tfplan", 0}, // deny do force push vence antes
 		{`echo "terraform apply create.tfplan"`, 0},              // é só texto
 		{"terraform apply create.tfplan", 1},                     // aqui o plano decide

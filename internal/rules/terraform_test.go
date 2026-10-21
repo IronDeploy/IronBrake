@@ -55,9 +55,20 @@ func TestCheckTerraformApply(t *testing.T) {
 		// Plano salvo que não dá para ler: deny (na dúvida, trava).
 		{"plano inexistente", `terraform apply missing.tfplan`, hook.Deny, ""},
 
-		// cd na mesma linha: não dá para saber qual plano será aplicado. Deny.
-		{"cd antes do apply", `cd infra && terraform apply create.tfplan`, hook.Deny, ""},
-		{"pushd antes do apply", `pushd infra; terraform apply create.tfplan`, hook.Deny, ""},
+		// cd literal ligado por &&: o plano é lido na pasta do cd. O resto, Deny.
+		{"cd literal antes do apply", `cd ./infra && terraform apply create.tfplan`, hook.Allow, ""},
+		{"cd absoluto", `cd /elsewhere && terraform apply create.tfplan`, hook.Allow, ""},
+		{"dois cd", `cd ./infra && cd .. && terraform apply create.tfplan`, hook.Allow, ""},
+		{"cd com ponto e vírgula", `cd infra; terraform apply create.tfplan`, hook.Deny, ""},
+		{"cd com ||", `cd infra || terraform apply create.tfplan`, hook.Deny, ""},
+		{"cd em subshell", `(cd infra && true) && terraform apply create.tfplan`, hook.Deny, ""},
+		{"cd em segundo plano", `cd infra & terraform apply create.tfplan`, hook.Deny, ""},
+		{"cd com til", `cd ~/infra && terraform apply create.tfplan`, hook.Deny, ""},
+		{"cd com variável", `cd $DIR && terraform apply create.tfplan`, hook.Deny, ""},
+		{"cd -", `cd - && terraform apply create.tfplan`, hook.Deny, ""},
+		{"cd sem pasta", `cd && terraform apply create.tfplan`, hook.Deny, ""},
+		{"popd antes do apply", `popd && terraform apply create.tfplan`, hook.Deny, ""},
+		{"pushd antes do apply", `pushd ./infra && terraform apply create.tfplan`, hook.Allow, ""},
 		{"cd depois do apply não importa", `terraform apply create.tfplan && cd ..`, hook.Allow, ""},
 
 		// Plano salvo só com criação: allow.
@@ -144,8 +155,8 @@ func TestApplyMessagesNameTheTool(t *testing.T) {
 	cases := []struct{ command, want string }{
 		{`terragrunt apply`, "rode terragrunt plan -out=tfplan primeiro e depois terragrunt apply tfplan."},
 		{`tofu apply`, "rode tofu plan -out=tfplan primeiro e depois tofu apply tfplan."},
-		{`cd x && terragrunt apply tfplan`, "use terragrunt --working-dir PASTA apply tfplan."},
-		{`cd x && tofu apply tfplan`, "use tofu -chdir=PASTA apply tfplan."},
+		{`cd ~ && terragrunt apply tfplan`, "use terragrunt --working-dir PASTA apply tfplan."},
+		{`cd ~ && tofu apply tfplan`, "use tofu -chdir=PASTA apply tfplan."},
 	}
 	for _, c := range cases {
 		_, reason := CheckTerraformApply(c.command, "/projeto", devEnv, fakeReadPlan(new(string)))
@@ -212,11 +223,71 @@ func TestFreshPlanMessageKeepsThePlanFileName(t *testing.T) {
 }
 
 func TestTerraformApplyWithCdMessage(t *testing.T) {
-	_, reason := CheckTerraformApply(`cd infra && terraform apply tfplan`, "/projeto", devEnv, fakeReadPlan(new(string)))
+	_, reason := CheckTerraformApply(`cd ~/infra && terraform apply tfplan`, "/projeto", devEnv, fakeReadPlan(new(string)))
 
-	want := "Iron Brake: terraform apply depois de cd na mesma linha bloqueado: não dá para saber qual plano será aplicado. use terraform -chdir=PASTA apply tfplan. Aplicar o plano de outra pasta pode apagar ou alterar recursos que ninguém revisou."
+	want := "Iron Brake: terraform apply depois de um cd que não dá para resolver bloqueado: não dá para saber qual plano será aplicado. só aceito cd ./PASTA, cd ../PASTA ou cd /PASTA literal ligado por && (sem ~, -, $VAR, ;, ||, | nem subshell; o CDPATH do shell pode desviar um cd PASTA sem ./). ou use terraform -chdir=PASTA apply tfplan. Aplicar o plano de outra pasta pode apagar ou alterar recursos que ninguém revisou."
 	if reason != want {
 		t.Errorf("motivo:\nesperava %q\nobtive    %q", want, reason)
+	}
+}
+
+func TestTerraformApplyReadsPlanInFolderOfLiteralCd(t *testing.T) {
+	cases := []struct{ command, cwd, want string }{
+		{`cd ./infra && terraform apply create.tfplan`, "/projeto", "/projeto/infra"},
+		{`cd /elsewhere && terraform apply create.tfplan`, "/projeto", "/elsewhere"},
+		{`cd ./infra && cd ../dev && terraform apply create.tfplan`, "/projeto", "/projeto/dev"},
+		{`cd ./infra && terraform -chdir=dev apply create.tfplan`, "/projeto", "/projeto/infra"},
+	}
+	for _, c := range cases {
+		var gotCwd string
+		readPlan := func(req tfplan.Request) ([]byte, error) {
+			gotCwd = req.Cwd
+			return fakeReadPlan(new(string))(req)
+		}
+		d, _ := CheckTerraformApply(c.command, c.cwd, devEnv, readPlan)
+		if d != hook.Allow || gotCwd != c.want {
+			t.Errorf("%s: decisão %v, pasta %q; esperava allow em %q", c.command, d, gotCwd, c.want)
+		}
+	}
+}
+
+// O CDPATH pode vir do rc do shell da ferramenta Bash, que o hook não vê:
+// "cd infra" pode ir para outra pasta, "cd ./infra" nunca.
+func TestTerraformApplyCdNeedsExplicitRelativePath(t *testing.T) {
+	cases := []struct {
+		command string
+		want    hook.Decision
+	}{
+		{`cd infra && terraform apply create.tfplan`, hook.Deny},
+		{`cd infra/dev && terraform apply create.tfplan`, hook.Deny},
+		{`cd ./infra && terraform apply create.tfplan`, hook.Allow},
+		{`cd ../dev && terraform apply create.tfplan`, hook.Allow},
+		{`cd /elsewhere && terraform apply create.tfplan`, hook.Allow},
+		{`cd .. && terraform apply create.tfplan`, hook.Allow},
+		{`CDPATH=/outro cd ./infra && terraform apply create.tfplan`, hook.Allow},
+	}
+	for _, c := range cases {
+		if d, _ := CheckTerraformApply(c.command, "/projeto", devEnv, fakeReadPlan(new(string))); d != c.want {
+			t.Errorf("%s: esperava %v, obtive %v", c.command, c.want, d)
+		}
+	}
+}
+
+func TestTerraformApplyCdWithoutKnownCwdDenies(t *testing.T) {
+	d, _ := CheckTerraformApply(`cd ./infra && terraform apply create.tfplan`, "", devEnv, fakeReadPlan(new(string)))
+	if d != hook.Deny {
+		t.Errorf("sem a pasta atual, um cd relativo não se resolve: esperava deny, obtive %v", d)
+	}
+}
+
+func TestTerraformApplyFreshPlanInOtherFolderIsAnotherFile(t *testing.T) {
+	d, _ := CheckTerraformApply(`terraform plan -out=create.tfplan && cd ./infra && terraform apply create.tfplan`, "/projeto", devEnv, fakeReadPlan(new(string)))
+	if d != hook.Allow {
+		t.Errorf("o plano gravado em /projeto não é o de /projeto/infra: esperava allow, obtive %v", d)
+	}
+	d, _ = CheckTerraformApply(`cd ./infra && terraform plan -out=create.tfplan && terraform apply create.tfplan`, "/projeto", devEnv, fakeReadPlan(new(string)))
+	if d != hook.Deny {
+		t.Errorf("mesmo plano gravado e aplicado na mesma pasta: esperava deny, obtive %v", d)
 	}
 }
 

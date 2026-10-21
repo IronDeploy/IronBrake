@@ -160,12 +160,21 @@ decidiria sem ver o que muda. A mensagem agora diz exatamente como separar:
 Apply de **outro** plano na mesma linha (`plan -out=a && apply b`) segue a regra
 normal e lê o `b`.
 
-## 5. `cd` na mesma linha é bloqueado
+## 5. `cd` na mesma linha: só o literal explícito, ligado por `&&`
 
-`cd infra && terraform apply tfplan` → deny, porque o Iron Brake não sabe com
-certeza qual arquivo será aplicado (`cd ~`, `cd -`, `cd $VAR`...). Só `cd`,
-`pushd` e `popd` são detectados; `(cd x; ...)` e outras formas de trocar de
-pasta não são. Alternativa aceita: `terraform -chdir=infra apply tfplan`.
+`cd ./infra && terraform apply tfplan` → o plano é lido em `infra` (relativo à
+pasta do evento), como o shell faria. Valem `cd` e `pushd` com destino literal
+que comece por `./`, `../` ou `/` (ou seja `.` e `..`), ligados por `&&`;
+vários em sequência também. Qualquer outra forma → deny, porque não dá para
+garantir qual pasta fica como atual: `cd ~`, `cd -`, `cd $VAR`, `cd` sem
+destino, `popd`, e linhas com `;`, `||`, `|`, `&`, `( )`, `{ }`, crase ou
+quebra de linha (o `cd` que falha seguido de `;` aplicaria o plano da pasta
+antiga). Sem a pasta atual no evento, só `cd` absoluto se resolve.
+
+`cd infra` (sem `./`) também é deny: se o shell tiver `CDPATH`, ele pode ir
+para outra pasta, e o hook não tem como ver um `CDPATH` definido no rc do
+shell da ferramenta Bash. Por isso a mensagem pede `cd ./infra`. Alternativa
+sempre aceita: `terraform -chdir=infra apply tfplan`.
 
 ## 6. Depois de aprovar na janela, o Claude Code podia perguntar de novo (corrigido e verificado)
 
