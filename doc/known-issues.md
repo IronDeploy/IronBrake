@@ -162,17 +162,36 @@ Limites:
   aprovação depender do código 1, que também é o código de erro dele. Um KDE
   sem `zenity` cai no fallback (ask do Claude Code).
 - O programa é o `/usr/bin/zenity` (caminho absoluto, contra um `zenity` falso no
-  PATH): distribuições sem `/usr/bin/zenity` (NixOS, `zenity` de Flatpak ou Snap)
-  caem no fallback.
+  PATH): distribuições sem `/usr/bin/zenity` caem no fallback. **Decisão de
+  2026-10-23: não procurar outros caminhos por enquanto.** Flatpak: o Flathub
+  não tem um `zenity` (busca vazia), então não há o que achar. Snap: só existe
+  um `zenity` de terceiro (publicado por um usuário, não pela Canonical), e o
+  Ubuntu já traz o dele em `/usr/bin`; aprovar comandos por um binário
+  de terceiro não vale o risco. NixOS é o único caso real (o `zenity` fica em
+  `/run/current-system/sw/bin/zenity`, uma cadeia de links de `root` para o
+  `/nix/store`, que o agente não consegue trocar). Dá para aceitar esse
+  caminho **depois de testar num NixOS de verdade**, o que ainda não foi
+  feito; um `zenity` instalado por usuário (`~/.nix-profile`) nunca serve,
+  porque o agente escreve ali.
 - O texto é cortado em 24 linhas e 1600 caracteres (marcado com …): sem isso o
   `zenity` cresce além da tela e os botões somem. Num cartão enorme, o fim da
   lista (inclusive "... e mais N") pode não aparecer.
 - Sem display de verdade o `zenity` sai com 1, o mesmo código do Cancelar; o
   Iron Brake distingue pelo "display" no stderr do GTK. Se essa mensagem mudar,
   o resultado é uma recusa (deny), nunca uma aprovação.
-- **Não verificado:** GNOME, KDE ou Wayland de verdade (só Xvfb), o `zenity` 3.x
-  abrindo a janela (só as opções foram conferidas), vários monitores, um clique
-  humano (os cliques foram do `xdotool`) e o Claude Code no Linux.
+- **Verificado em 2026-10-23 num desktop de verdade** (VM Ubuntu 22.04 arm64
+  no UTM, `zenity` 3.42.1, `/usr/bin/zenity`; teste `TestConfirmLinuxLive` com
+  `IRON_DIALOG_WAIT=60`, sessão confirmada com `loginctl`, cliques de uma
+  pessoa): **GNOME no Wayland**, **GNOME no X11** ("Ubuntu on Xorg"), **KDE
+  Plasma no X11** e **KDE Plasma no Wayland**. Em todas, Executar voltou
+  `approved` e Cancelar voltou `rejected`. No GNOME/Wayland a janela abriu por
+  cima de outras janelas e o texto e os botões estavam inteiros; o Enter
+  recusou (Cancelar é o padrão). Isto cobre também o `zenity` 3.x (o 4.1 foi o
+  testado em Docker).
+- **Ainda não verificado:** o Enter e a janela por cima das outras no KDE e no
+  GNOME/X11 (nessas rodadas só se confirmou a resposta dos cliques); vários
+  monitores; tela cheia; o Claude Code real no Linux (`iron init`, `doctor` e
+  `hook` com o agente, ver a issue #50); NixOS.
 
 ## 4. Linha com plan e apply juntos é bloqueada (decisão mantida)
 
@@ -228,6 +247,12 @@ linha não passar de carona — e aí o Claude Code ainda pode perguntar.
   acima de todas as janelas normais, mesmo com o VS Code em foco. Colocar
   `activate` no script **piora**: o diálogo nem apareceu em 1,5 s. Não testado:
   app em tela cheia (outro Space) e vários monitores.
+- **Janela atrás de outras no Linux (verificado em 2026-10-23, GNOME/Wayland):**
+  o diálogo do `zenity` abriu por cima de outra janela aberta. No KDE e no
+  GNOME/X11 só a resposta aos cliques foi conferida, não a ordem das janelas.
+  Num gerenciador de janelas que impeça o foco (o Wayland pode recusar que um
+  processo sem janela passe à frente), a janela pode abrir atrás e o hook
+  esperar até o tempo esgotar, que conta como recusa.
 - **Agente com controle do computador** (computer use, permissão de
   Acessibilidade) poderia, em tese, clicar em Executar.
 
@@ -443,7 +468,7 @@ Decisões tomadas depois da revisão:
     (o agente consultou o arquivo e não o removeu); ele foi verificado com o Git.
   - **Não verificado:** Kiro, Codex e Antigravity no Windows (só eventos
     simulados); o `terraform apply` destrutivo pelo agente real no Windows; o
-    `iron.exe` x64 (a máquina era ARM64); a janela de confirmação num desktop Linux real (Windows e Linux em Docker foram verificados, ver seção 3). O `install.sh` não roda no
+    `iron.exe` x64 (a máquina era ARM64); a janela de confirmação no Linux com o agente real (a janela em si foi verificada em quatro desktops, ver seção 3). O `install.sh` não roda no
     Windows (instalação manual pelo `.exe`). O portão da AWS recusa funcionar lá.
 - **O `SHA256SUMS` vem da mesma release que o binário:** pega download
   corrompido, não release adulterada. A conferência contra adulteração é o
@@ -456,8 +481,21 @@ Decisões tomadas depois da revisão:
   diretório temporário: instalou a release real; recusou, sem instalar nada,
   um binário adulterado cujo `SHA256SUMS` foi ajustado junto (o hash passa, o
   atestado não); e, **sem** a variável, instalou esse mesmo binário adulterado
-  (é o limite descrito acima). Não testado: o instalador no Linux e o caso de
-  `gh` ausente. O instalador **não** exige o atestado por padrão (o `gh` não
+  (é o limite descrito acima). **Verificado em 2026-10-23 (`v0.3.0`) no
+  Linux:** o instalador real (`curl ... | sh`) passou numa VM Ubuntu 22.04
+  arm64 (UTM) e em contêineres Debian (stable-slim), Ubuntu 24.04 e Alpine,
+  em arm64 e amd64: baixa, confere o hash, instala e o `iron version` roda
+  (o binário é estático, roda no Alpine/musl). O PATH foi gravado e achado
+  num shell novo em bash (`~/.bashrc`), zsh (`~/.zshrc`) e fish
+  (`fish_add_path -U`); uma segunda execução não duplica a linha. Com
+  `IRON_VERIFY_ATTESTATION=1` e **sem** o `gh`, o instalador sai com código 1,
+  diz `precisa do gh` e não cria a pasta de instalação. O teste em contêiner
+  está em `scripts/test-install-linux.sh` e roda no CI (job `installer`,
+  Debian, Ubuntu e Alpine em amd64). Limites: o zsh e o fish foram testados
+  com `HOME` temporário e `SHELL` ajustado, não num login real; em contêiner
+  o `SHELL` é vazio, então o instalador só avisa qual linha pôr no perfil; o
+  aviso final do fish dizia `export PATH=...`, que não é sintaxe dele; foi
+  corrigido para `fish_add_path` e conferido na VM. O instalador **não** exige o atestado por padrão (o `gh` não
   vem instalado). O `gh` precisa de login por OAuth: um fine-grained PAT com
   validade acima de 366 dias é recusado (HTTP 403) por organizações que
   limitam isso.

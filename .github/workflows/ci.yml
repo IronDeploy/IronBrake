@@ -36,6 +36,22 @@ jobs:
           run: go vet ./...
         - name: Run tests
           run: make test
+    installer:
+        runs-on: ubuntu-24.04
+        steps:
+        - name: Checkout code
+          uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+          with:
+            persist-credentials: false
+        - name: Set up Go
+          uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+          with:
+            go-version-file: go.mod
+            cache: true
+        - name: Gerar dist
+          run: make dist VERSION=v0.0.0-ci
+        - name: Instalar em Debian, Ubuntu e Alpine
+          run: scripts/test-install-linux.sh
     govulncheck:
         runs-on: ubuntu-24.04
         steps:
