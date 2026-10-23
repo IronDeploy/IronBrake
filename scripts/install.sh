@@ -137,6 +137,11 @@ case ":$PATH:" in
 esac
 
 if [ "$need_restart" = 1 ]; then
-	echo "iron: abra um novo terminal (ou rode:  export PATH=\"$INSTALL_DIR:\$PATH\") para usar o comando iron"
+	if [ "${profile:-}" = "fish" ]; then
+		# No fish o PATH já vale em todo terminal novo; e `export` não é sintaxe dele.
+		echo "iron: abra um novo terminal (ou rode:  fish_add_path $INSTALL_DIR) para usar o comando iron"
+	else
+		echo "iron: abra um novo terminal (ou rode:  export PATH=\"$INSTALL_DIR:\$PATH\") para usar o comando iron"
+	fi
 fi
 echo "iron: próximo passo, na pasta do seu projeto:  iron init && iron doctor"
