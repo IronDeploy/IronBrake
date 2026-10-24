@@ -605,3 +605,17 @@ func TestApplyInChdirWorkspaceIsProduction(t *testing.T) {
 		t.Errorf("outra pasta: esperava ask, obtive %q", got)
 	}
 }
+
+// Sem o init da pasta, ou sem login no backend remoto (HCP), o show falha. O
+// motivo precisa apontar essas causas, não só mandar refazer o plano.
+func TestUnreadablePlanReasonPointsToInitAndLogin(t *testing.T) {
+	got := readPlanReason(errors.New("terraform show falhou"), "terraform")
+	for _, want := range []string{"terraform init", "login", "plan -out=tfplan"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("o motivo deveria citar %q: %s", want, got)
+		}
+	}
+	if tofu := readPlanReason(errors.New("x"), "tofu"); !strings.Contains(tofu, "tofu init") {
+		t.Errorf("o motivo deveria falar do tofu: %s", tofu)
+	}
+}
