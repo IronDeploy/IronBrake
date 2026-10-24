@@ -7,6 +7,7 @@ import (
 
 const (
 	cdkDestroyDanger     = "cdk destroy apaga as stacks do CloudFormation e os recursos que elas criaram: serviços saem do ar e dados podem ser perdidos."
+	cdkGcDanger          = "cdk gc apaga os ativos sem uso do bucket S3 e dos repositórios ECR do bootstrap (o padrão é --action full, que marca e apaga): um rollback ou uma nova implantação que ainda precise deles falha."
 	cdkAutoApproveDanger = "cdk deploy --require-approval never aplica sem confirmar mudanças de segurança (IAM, security groups): é o equivalente do terraform apply -auto-approve."
 	samDeleteDanger      = "sam delete apaga a stack do CloudFormation e os artefatos no S3: os recursos criados por ela somem."
 	eksctlDeleteDanger   = "eksctl delete apaga o cluster EKS, os grupos de nós ou as contas de serviço: as cargas que rodam ali saem do ar."
@@ -65,11 +66,17 @@ func matchIaC(tokens []string) (string, bool) {
 var (
 	cdkVerbs = set("list", "ls", "synthesize", "synth", "bootstrap", "deploy", "destroy", "diff", "metadata",
 		"init", "context", "docs", "doc", "doctor", "acknowledge", "ack", "notices", "import", "watch",
-		"rollback", "gc", "migrate", "refactor", "flags")
+		"rollback", "gc", "migrate", "refactor", "flags", "validate", "diagnose", "drift", "publish-assets",
+		"orphan", "lsp", "cli-telemetry")
 	cdkValueFlags = set("--app", "-a", "--context", "-c", "--plugin", "-p", "--profile", "--proxy",
 		"--ca-bundle-path", "--role-arn", "-r", "--output", "-o", "--build", "--toolkit-stack-name",
 		"--require-approval", "--outputs-file", "-O", "--parameters", "--tags", "-t",
-		"--notification-arns", "--progress", "--concurrency", "--method", "--change-set-name")
+		"--notification-arns", "--progress", "--concurrency", "--method", "--change-set-name",
+		"--region", "--unstable", "-E", "-m", "--asset-build-concurrency", "--build-exclude",
+		"--hotswap-ecs-maximum-healthy-percent", "--hotswap-ecs-minimum-healthy-percent",
+		"--hotswap-ecs-stabilization-timeout-seconds", "--monitoring-time-minutes",
+		"--rollback-trigger-alarm-arns", "--telemetry-file", "--action", "--type", "--rollback-buffer-days",
+		"--created-buffer-days", "--bootstrap-stack-name")
 
 	samVerbs = set("init", "build", "deploy", "delete", "local", "logs", "package", "publish", "sync",
 		"traces", "validate", "pipeline", "list", "remote", "bootstrap", "docs")
@@ -77,16 +84,19 @@ var (
 		"--s3-bucket", "--s3-prefix", "--template", "--template-file", "-t", "--template-file")
 
 	eksctlVerbs = set("create", "get", "delete", "update", "upgrade", "scale", "drain", "set", "unset",
-		"enable", "disable", "utils", "associate", "anywhere", "register", "deregister", "completion",
+		"enable", "disable", "utils", "associate", "anywhere", "register", "deregister", "disassociate", "completion",
 		"version", "info", "help")
 	eksctlValueFlags = set("--name", "-n", "--region", "-r", "--cluster", "--profile", "-p",
-		"--config-file", "-f", "--nodegroup-name", "--timeout", "--color", "--verbose", "-v")
+		"--config-file", "-f", "--nodegroup-name", "--timeout", "--color", "-C", "--verbose", "-v",
+		"--cfn-role-arn", "--parallel", "--pod-eviction-wait-period")
 
-	pulumiVerbs = set("up", "update", "destroy", "down", "preview", "refresh", "stack", "state", "new",
+	pulumiVerbs = set("up", "update", "destroy", "down", "dn", "preview", "refresh", "stack", "state", "new",
 		"login", "logout", "config", "import", "watch", "cancel", "console", "convert", "env", "gen-completion",
 		"install", "logs", "org", "package", "plugin", "policy", "schema", "version", "whoami", "about")
 	pulumiValueFlags = set("--stack", "-s", "--cwd", "-C", "--config-file", "--color", "--message", "-m",
-		"--secrets-provider", "--target", "-t", "--parallel", "-p", "--policy-pack", "--diff-url", "--logflow")
+		"--secrets-provider", "--target", "-t", "--parallel", "-p", "--policy-pack", "--diff-url", "--logflow",
+		"--config", "-c", "--exclude", "-x", "--replace", "--target-replace", "--verbose", "-v",
+		"--override-env", "--policy-pack-config", "--profiling", "--memprofilerate", "--otel-traces")
 
 	serverlessVerbs = set("deploy", "remove", "invoke", "logs", "info", "package", "print", "create",
 		"install", "rollback", "metrics", "plugin", "offline", "login", "logout", "config", "doctor", "dev")
@@ -105,8 +115,35 @@ func matchCdk(args []string) (string, bool) {
 		if value, ok := optionValue(args, "--require-approval"); ok && value == "never" {
 			return cdkAutoApproveDanger, true
 		}
+	case "gc":
+		if !cdkGcOnlyReads(args) {
+			return cdkGcDanger, true
+		}
 	}
 	return "", false
+}
+
+// cdkGcOnlyReads diz se o cdk gc só olha: --action print lista e --action tag só
+// marca. Sem --action vale o padrão (full), que apaga. Se a opção vier repetida,
+// qualquer valor que apague conta.
+func cdkGcOnlyReads(args []string) bool {
+	seen := false
+	for i, a := range args {
+		var value string
+		switch {
+		case a == "--action" && i+1 < len(args):
+			value = args[i+1]
+		case strings.HasPrefix(a, "--action="):
+			value = a[len("--action="):]
+		default:
+			continue
+		}
+		if value != "print" && value != "tag" {
+			return false
+		}
+		seen = true
+	}
+	return seen
 }
 
 func matchPulumi(args []string) (string, bool) {
@@ -114,7 +151,7 @@ func matchPulumi(args []string) (string, bool) {
 	command := firstIn(pos, pulumiVerbs)
 
 	switch command {
-	case "destroy", "down":
+	case "destroy", "down", "dn":
 		// --preview-only só mostra o que seria apagado.
 		if !flagOn(args, "--preview-only", 0) {
 			return pulumiDestroyDanger, true

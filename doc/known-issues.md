@@ -49,11 +49,11 @@ deny), kubectl (`delete pvc/pv/crd`, `delete -A`/`--all-namespaces`, `scale --re
 `replace --force`), helm
 (`uninstall`, `rollback`), nuvem em massa (`s3 rm --recursive`, `s3 rb --force`,
 `gcloud/gsutil storage rm`, `az ... delete-*`/`purge`), IaC da AWS e vizinhos
-(`cdk destroy`, `cdk deploy --require-approval never`, `sam delete`, `eksctl delete`,
+(`cdk destroy`, `cdk gc` (salvo `--action print`/`tag`), `cdk deploy --require-approval never`, `sam delete`, `eksctl delete`,
 `pulumi destroy`/`up --yes`/`stack rm --force`/`state delete`, `serverless remove`,
 `cdktf destroy`; também via `npx`/`pnpx`/`bunx`/`pnpm dlx`/`yarn dlx`/`npm exec` e pelo nome do
-pacote, como `aws-cdk@2`; só verificado com o binário e eventos
-montados à mão, **não** com as ferramentas de verdade), SQL (`DROP SCHEMA`, `DELETE ... WHERE 1=1`, `WHERE TRUE`, `WHERE id=1 OR 1=1` e outros
+pacote, como `aws-cdk@2`; conferido contra as ferramentas reais, ver a
+seção 2), SQL (`DROP SCHEMA`, `DELETE ... WHERE 1=1`, `WHERE TRUE`, `WHERE id=1 OR 1=1` e outros
 `WHERE` sempre verdadeiros).
 
 Também passou a **ler o arquivo apontado** pelo comando: `kubectl delete -f x.yaml`
@@ -112,6 +112,32 @@ Limites:
   contexto, não dos módulos que o terragrunt percorre, e o cartão não diz de
   qual unidade vem cada recurso. Contorno: rodar a partir de `live/prod` ou
   usar `--working-dir live/prod`, ou conferir o cartão antes de clicar.
+
+- **IaC da AWS e vizinhos, conferido com as ferramentas reais (2026-10-24):**
+  `aws-cdk` 2.1146.1, `aws-sam-cli` 1.170.0, `eksctl` 0.231.0, `pulumi` 3.272.0,
+  `serverless` 4.45.0 e `cdktf-cli` 0.21.0, instalados à parte. O `--help` de
+  cada uma foi lido e comparado com as tabelas de subcomandos e de opções com
+  valor da regra, e 104 comandos reais passaram pela decisão pura (sem janela).
+  Achados, **corrigidos**: o `pulumi dn` é alias oficial de `destroy`
+  (`destroy, down, dn`) e passava como `allow`; opções com valor que a regra
+  desconhecia deixavam o valor esconder o subcomando (`cdk --region deploy
+  destroy`, `pulumi --exclude up destroy` passavam); subcomandos novos do cdk
+  (`validate`, `diagnose`, `drift`, `publish-assets`, `orphan`, `lsp`,
+  `cli-telemetry`) e o `eksctl disassociate` não estavam nas tabelas. Também
+  conferido que `npx aws-cdk@2`, `npx --package aws-cdk cdk`, `npm exec
+  --package=aws-cdk -- cdk` e `npx cdktf-cli` rodam mesmo o comando que a regra
+  lê. **Regra nova:** `cdk gc` pede confirmação (deny em produção), porque o
+  padrão (`--action full`) apaga os ativos sem uso do bucket S3 e dos
+  repositórios ECR do bootstrap; só `--action print` (lista) e `--action tag`
+  (marca) passam. **Continuam sem regra, por decisão:** `cdk orphan` (solta
+  recursos da stack sem apagá-los) e `eksctl disassociate`. **Limites:** nada
+  disso rodou contra uma conta da AWS (não havia credenciais); o `pnpm` e o
+  `yarn` não estavam instalados, então `pnpm dlx`, `pnpm exec` e `yarn dlx`
+  seguem só com a leitura da regra; o `serverless` 4 pede login até para
+  `--help`, então o `serverless remove` e o `sls remove` não tiveram a
+  gramática extraída (só se confirmou que o pacote traz os binários
+  `serverless` e `sls`); o `eksctl delete --help` dá `ask`, porque a regra olha
+  o verbo e não o `--help`.
 
 Qualquer regra também escapa por variável no lugar do comando e por scripts
 (seção 1). Prefixos (`sudo`, `env`, `sh -c`, `eval`...) **não** escapam: são

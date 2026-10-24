@@ -24,6 +24,25 @@ func TestIaCDestructive(t *testing.T) {
 		{`npx cdk deploy --all --require-approval never`, hook.Ask, hook.Deny},
 		{`cdk watch --require-approval never`, hook.Ask, hook.Deny},
 
+		// cdk gc: o padrão (--action full) apaga; só print e tag não apagam.
+		{`cdk gc`, hook.Ask, hook.Deny},
+		{`cdk gc aws://123456789012/us-east-1`, hook.Ask, hook.Deny},
+		{`cdk gc --unstable=gc`, hook.Ask, hook.Deny},
+		{`cdk gc --action full`, hook.Ask, hook.Deny},
+		{`cdk gc --action=delete-tagged`, hook.Ask, hook.Deny},
+		{`cdk gc --type s3 --yes`, hook.Ask, hook.Deny},
+		{`cdk gc --confirm=false`, hook.Ask, hook.Deny},
+		{`cdk gc --action print --action full`, hook.Ask, hook.Deny},
+		{`cdk gc --action`, hook.Ask, hook.Deny},
+		{`cdk gc --action bogus`, hook.Ask, hook.Deny},
+		{`cdk --profile conta gc`, hook.Ask, hook.Deny},
+		{`npx aws-cdk@2 gc`, hook.Ask, hook.Deny},
+		{`cdk gc --action print`, hook.Allow, hook.Allow},
+		{`cdk gc --action=print`, hook.Allow, hook.Allow},
+		{`cdk gc --action tag`, hook.Allow, hook.Allow},
+		{`cdk gc --type s3 --action print`, hook.Allow, hook.Allow},
+		{`cdk gc --action=tag --rollback-buffer-days 7`, hook.Allow, hook.Allow},
+
 		// sam
 		{`sam delete`, hook.Ask, hook.Deny},
 		{`sam delete --stack-name app --no-prompts`, hook.Ask, hook.Deny},
@@ -69,6 +88,23 @@ func TestIaCDestructive(t *testing.T) {
 		{`yarn cdk destroy`, hook.Ask, hook.Deny},
 		{`bun x cdk destroy`, hook.Ask, hook.Deny},
 		{`pnpm exec pulumi destroy`, hook.Ask, hook.Deny},
+
+		// pulumi: "dn" é alias oficial de destroy (aliases: destroy, down, dn).
+		{`pulumi dn`, hook.Ask, hook.Deny},
+		{`pulumi dn --yes`, hook.Ask, hook.Deny},
+		{`pulumi --stack dev dn -y`, hook.Ask, hook.Deny},
+		{`pulumi dn --preview-only`, hook.Allow, hook.Allow},
+
+		// Flags com valor que as ferramentas reais têm: o valor não pode esconder o subcomando.
+		{`pulumi --exclude up destroy`, hook.Ask, hook.Deny},
+		{`pulumi --config up destroy`, hook.Ask, hook.Deny},
+		{`cdk --region deploy destroy`, hook.Ask, hook.Deny},
+		{`cdk -m deploy destroy`, hook.Ask, hook.Deny},
+		{`eksctl --cfn-role-arn get delete cluster -n app`, hook.Ask, hook.Deny},
+
+		// Via npx com --package (o que o npm exec roda de verdade).
+		{`npx --yes --package aws-cdk cdk destroy`, hook.Ask, hook.Deny},
+		{`npm exec --yes --package=aws-cdk -- cdk destroy`, hook.Ask, hook.Deny},
 
 		// pulumi: flags com valor e agrupadas.
 		{`pulumi up --yes=true`, hook.Ask, hook.Deny},
