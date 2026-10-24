@@ -127,16 +127,46 @@ Limites:
   conferido que `npx aws-cdk@2`, `npx --package aws-cdk cdk`, `npm exec
   --package=aws-cdk -- cdk` e `npx cdktf-cli` rodam mesmo o comando que a regra
   lê. **Regra nova:** `cdk gc` pede confirmação (deny em produção), porque o
-  padrão (`--action full`) apaga os ativos sem uso do bucket S3 e dos
-  repositórios ECR do bootstrap; só `--action print` (lista) e `--action tag`
+  padrão (`--action full`) apaga ativos do bucket S3 e dos repositórios
+  ECR do bootstrap (verificado: com `--created-buffer-days 0` apagou até o
+  template da stack implantada); só `--action print` (lista) e `--action tag`
   (marca) passam. **Continuam sem regra, por decisão:** `cdk orphan` (solta
-  recursos da stack sem apagá-los) e `eksctl disassociate`. **Limites:** nada
-  disso rodou contra uma conta da AWS (não havia credenciais); o `pnpm` e o
-  `yarn` não estavam instalados, então `pnpm dlx`, `pnpm exec` e `yarn dlx`
-  seguem só com a leitura da regra; o `serverless` 4 pede login até para
-  `--help`, então o `serverless remove` e o `sls remove` não tiveram a
-  gramática extraída (só se confirmou que o pacote traz os binários
-  `serverless` e `sls`); o `eksctl delete --help` dá `ask`, porque a regra olha
+  recursos da stack sem apagá-los) e `eksctl disassociate`. **Verificado contra uma conta da AWS de teste (vazia, em `sa-east-1`),
+  criando e apagando recursos de verdade (parâmetros do SSM e as stacks de
+  bootstrap):**
+  `pulumi up --yes`, depois `pulumi destroy --preview-only` (e a forma `=true`):
+  mostrou `2 to delete` e **não apagou nada** (o parâmetro continuou na AWS e no
+  estado); depois `pulumi dn --yes`: **apagou** (`2 deleted`, o parâmetro deu
+  `ParameterNotFound`), o que confirma o alias. `sam deploy` e `sam delete
+  --no-prompts`: a stack e o parâmetro sumiram. `cdk bootstrap`, `cdk deploy
+  --require-approval never` e `cdk destroy --force`: a stack e o parâmetro
+  sumiram. `cdk gc` com um ativo isolado e três arquivos no bucket do
+  bootstrap: `--action print` e `--action tag` **não apagaram nada** (os
+  objetos e os tags ficaram iguais, `0 deleted`); o `cdk gc` sem `--action`
+  (padrão `full`, com `--created-buffer-days 0`) **apagou os três, inclusive o
+  template da stack que continuava implantada**, e esvaziou o bucket. O
+  padrão de `--created-buffer-days` é 1 dia, que poupa ativos novos, mas a
+  opção pode ser passada. `cdktf deploy --auto-approve` aplicou sem pedir
+  confirmação e `cdktf destroy --auto-approve` destruiu (o recurso foi um
+  `terraform_data`, que não cria nada na AWS). `eksctl delete cluster` chegou à
+  API do EKS (404 de um cluster inexistente), sem criar cluster. A conta foi
+  deixada vazia no fim. **Também verificado depois, na mesma conta:** `pnpm` 12.15.0
+  (`pnpm dlx aws-cdk`, `pnpm dlx aws-cdk@2`, `pnpm exec cdk`, `pnpm cdk`),
+  `yarn` 1.22.22 (`yarn cdk`) e `yarn` 4.18.1 (`yarn dlx aws-cdk`) chegam
+  todos ao `cdk destroy` (conferido com `--help`); o `yarn dlx` **só existe
+  no Yarn 2+** (no 1.x dá `Command "dlx" not found`). O `serverless` 3.40.0
+  (sem login): `sls deploy` e `sls remove --stage dev` criaram e apagaram a
+  stack e o parâmetro de verdade; a gramática real mostrou as opções com valor
+  `--app`, `--org`, `--package`/`-p` e `--timestamp`/`-t`, e os subcomandos
+  `test`, `dashboard`, `generate-event`, `help`, `output`, `param` e `slstats`,
+  que a regra não tinha (corrigido). **Limites:** o `serverless` 4 pede login
+  até para `--help` e não foi rodado; o `remove` dele é o mesmo comando do 3.
+  A opção `--debug` do `serverless` aceita um valor opcional e a regra a trata
+  como flag simples (lado conservador: `sls --debug remove` continua
+  barrado); o `eksctl` não criou nem
+  apagou cluster de verdade (custa por hora), só chamadas inofensivas; o hook
+  não estava ativo nas chamadas (a decisão foi medida pela regra, não pela
+  janela); o `eksctl delete --help` dá `ask`, porque a regra olha
   o verbo e não o `--help`.
 
 Qualquer regra também escapa por variável no lugar do comando e por scripts

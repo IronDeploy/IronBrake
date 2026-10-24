@@ -69,6 +69,13 @@ func TestIaCDestructive(t *testing.T) {
 		{`sls remove --stage prod`, hook.Deny, hook.Deny},
 		{`npx serverless remove`, hook.Ask, hook.Deny},
 
+		// serverless 3: opções com valor que escondiam o subcomando.
+		{`sls --app deploy remove`, hook.Ask, hook.Deny},
+		{`serverless --org deploy remove --stage dev`, hook.Ask, hook.Deny},
+		{`sls --package deploy remove`, hook.Ask, hook.Deny},
+		{`sls --stage dev remove`, hook.Ask, hook.Deny},
+		{`sls param list`, hook.Allow, hook.Allow},
+
 		// cdktf
 		{`cdktf destroy`, hook.Ask, hook.Deny},
 		{`cdktf deploy --auto-approve`, hook.Ask, hook.Deny},

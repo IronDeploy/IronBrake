@@ -7,7 +7,7 @@ import (
 
 const (
 	cdkDestroyDanger     = "cdk destroy apaga as stacks do CloudFormation e os recursos que elas criaram: serviços saem do ar e dados podem ser perdidos."
-	cdkGcDanger          = "cdk gc apaga os ativos sem uso do bucket S3 e dos repositórios ECR do bootstrap (o padrão é --action full, que marca e apaga): um rollback ou uma nova implantação que ainda precise deles falha."
+	cdkGcDanger          = "cdk gc apaga ativos do bucket S3 e dos repositórios ECR do bootstrap (o padrão é --action full, que marca e apaga; com --created-buffer-days 0 apagou até o template de uma stack implantada): um rollback ou uma nova implantação que ainda precise deles falha."
 	cdkAutoApproveDanger = "cdk deploy --require-approval never aplica sem confirmar mudanças de segurança (IAM, security groups): é o equivalente do terraform apply -auto-approve."
 	samDeleteDanger      = "sam delete apaga a stack do CloudFormation e os artefatos no S3: os recursos criados por ela somem."
 	eksctlDeleteDanger   = "eksctl delete apaga o cluster EKS, os grupos de nós ou as contas de serviço: as cargas que rodam ali saem do ar."
@@ -99,9 +99,10 @@ var (
 		"--override-env", "--policy-pack-config", "--profiling", "--memprofilerate", "--otel-traces")
 
 	serverlessVerbs = set("deploy", "remove", "invoke", "logs", "info", "package", "print", "create",
-		"install", "rollback", "metrics", "plugin", "offline", "login", "logout", "config", "doctor", "dev")
+		"install", "rollback", "metrics", "plugin", "offline", "login", "logout", "config", "doctor", "dev",
+		"test", "dashboard", "generate-event", "help", "output", "param", "slstats")
 	serverlessValueFlags = set("--stage", "-s", "--region", "-r", "--config", "-c", "--aws-profile",
-		"--function", "-f", "--param")
+		"--function", "-f", "--param", "--app", "--org", "--package", "-p", "--timestamp", "-t")
 
 	cdktfVerbs = set("deploy", "destroy", "diff", "synth", "get", "init", "list", "login", "provider",
 		"watch", "debug", "convert", "completion", "output", "version")
