@@ -567,8 +567,32 @@ Decisões tomadas depois da revisão:
   arquivo do plano depois que o hook o leu, o terraform aplica o novo. Risco
   baixo.
 - **`terraform show` precisa de `terraform init`** na pasta; sem isso, o plano
-  não é lido e o resultado é deny.
-- **Backends remotos (Terraform Cloud/HCP):** não testado.
+  não é lido e o resultado é deny. **Verificado em 2026-10-24 (terraform
+  1.16.4):** com um recurso de provedor real (`hashicorp/random`) e o `.terraform`
+  apagado, o hook nega; com um recurso nativo (`terraform_data`) o `show` ainda
+  lê, porque não precisa do esquema de nenhum provedor. O motivo do deny agora
+  cita o `init` e o login do backend remoto; antes só mandava refazer o `plan -out`,
+  que falharia do mesmo jeito.
+- **Backends remotos, verificado em 2026-10-24 (terraform 1.16.4; o workspace
+  do HCP rodou 1.17.0):** com um backend `http` (estado e trava remotos), o
+  `terraform show -json` do plano salvo lê o plano **sem contatar o backend**
+  (também com o servidor fora do ar), e o cartão mostra `Apagar: 1 | Substituir: 1`
+  com os endereços. **HCP Terraform** (`cloud { }`, workspace com execução
+  remota): o `plan -out=tfplan` funciona, mas o arquivo gravado **não é o plano**:
+  tem 86 bytes, `{"remote_plan_format":1,"run_id":"run-...","hostname":"app.terraform.io"}`,
+  e o `terraform show -json` **busca o plano no HCP pela rede, com o token**
+  (`TF_TOKEN_app_terraform_io` ou o `terraform login`). Com o token no ambiente
+  do hook o plano é lido e o cartão sai certo (criar 2; e `Apagar: 1 | Substituir: 1`
+  num plano destrutivo, que o `terraform apply tfplan2` aplicou de verdade:
+  `1 added, 2 destroyed`). Sem o token o `show` falha e o hook **nega**, com o
+  motivo acima. O `terraform apply` direto (sem plano salvo, o fluxo comum do
+  HCP) continua negado, e a instrução do motivo (`plan -out` e depois `apply
+  tfplan`) é executável no HCP. Como o plano fica no HCP e o arquivo só aponta para
+  ele, o plano que o hook leu é o mesmo que o apply usa. **Não verificado:**
+  workspace com execução **local** no HCP (o plano é o arquivo normal, igual ao
+  backend `http`), `backend "remote"` (legado), `terraform_remote_state`, planos
+  com variáveis sensíveis do workspace, `tofu` e `terragrunt` com HCP, e o
+  `terraform destroy` direto (outra regra, não medida aqui).
 - **Endereços no cartão:** chaves de `for_each` aparecem no endereço (ex.:
   `aws_iam_user.u["ana@empresa.com"]`). Não são atributos, mas podem conter
   dados que você preferiria não ver na tela.
