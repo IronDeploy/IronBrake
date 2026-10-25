@@ -15,6 +15,8 @@ instala em `~/.local/bin/iron`, sem `sudo`. Se essa pasta não estiver no PATH, 
 instalador a adiciona ao perfil do seu shell (`~/.zshrc` no zsh; `~/.bash_profile`
 no bash do macOS; `~/.bashrc` no bash do Linux; fish via `fish_add_path`). Abra um
 novo terminal depois. Para não alterar o perfil, use `IRON_NO_MODIFY_PATH=1`.
+O instalador foi verificado no macOS e no Linux (Ubuntu, Debian e Alpine, em arm64
+e amd64), com o PATH conferido em bash, zsh e fish.
 Se preferir ler antes de rodar:
 baixe o `install.sh` da [página de releases](https://github.com/IronDeploy/IronBrake/releases),
 leia e rode com `sh install.sh`. No Windows, baixe o `iron_windows_amd64.exe`
@@ -275,7 +277,11 @@ máquina remota via `ssh`. Lista completa na seção 1 e 2 de
 **Qual `terraform` o Iron Brake executa**
 
 Para ler o plano, o Iron Brake executa `terraform show -json` (ou `tofu`,
-`terragrunt`). Ele recusa o programa do `PATH` que estiver dentro do projeto ou
+`terragrunt`). A pasta precisa ter o `terraform init` feito (sem ele, com um provedor
+real, o plano não é lido e o comando é negado). Com o HCP Terraform em execução
+remota, o arquivo do plano é só uma referência e o `show` busca o plano no HCP:
+é preciso estar logado (`terraform login` ou `TF_TOKEN_app_terraform_io`) no
+ambiente do agente, senão o comando é negado. Ele recusa o programa do `PATH` que estiver dentro do projeto ou
 que qualquer usuário possa alterar. Para fixar o programa, crie
 `~/.iron/config.yaml` (do usuário, nunca do projeto):
 
@@ -310,7 +316,12 @@ auditoria recalculando a corrente de hashes, ou editar o `.iron/policy.yaml`
 A janela de confirmação com o motivo do bloqueio existe no macOS, no Windows
 (PowerShell) e no Linux (`zenity`, em `/usr/bin/zenity`, com X11 ou Wayland). Em
 sessões sem tela (SSH, nuvem) ou sem o `zenity`, a pergunta aparece pelo Claude
-Code, mas sem mostrar o porquê antes da decisão. O Windows foi validado numa máquina real (Windows 11 ARM64,
+Code, mas sem mostrar o porquê antes da decisão. No Linux a janela foi verificada
+com cliques de uma pessoa (zenity 3.42) no GNOME e no KDE, em X11 e em Wayland;
+com o Claude Code real também (bloqueio, liberação e a janela com Executar e
+Enter, que recusa), nas quatro sessões; uma tentativa no KDE/Wayland ficou sem
+resposta e a causa não foi isolada (ver o `known-issues.md`). Distribuições sem
+`/usr/bin/zenity` (NixOS) ainda não foram verificadas. O Windows foi validado numa máquina real (Windows 11 ARM64,
 2026-10-02): os testes passam, e `iron init`, `iron doctor` e `iron hook`
 funcionam com o `iron.exe` compilado lá. Com o Claude Code 2.1.288 real no Windows,
 a ferramenta `Bash` passa pelo hook (bloqueio, liberação e janela com Executar e

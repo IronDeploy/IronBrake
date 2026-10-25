@@ -244,10 +244,34 @@ Limites:
   cima de outras janelas e o texto e os botões estavam inteiros; o Enter
   recusou (Cancelar é o padrão). Isto cobre também o `zenity` 3.x (o 4.1 foi o
   testado em Docker).
-- **Ainda não verificado:** o Enter e a janela por cima das outras no KDE e no
-  GNOME/X11 (nessas rodadas só se confirmou a resposta dos cliques); vários
-  monitores; tela cheia; o Claude Code real no Linux (`iron init`, `doctor` e
-  `hook` com o agente, ver a issue #50); NixOS.
+- **Com o Claude Code 2.1.310 real no Linux, verificado em 2026-10-24** (VM
+  Ubuntu 22.04 arm64, GNOME/Wayland, `iron` compilado do código, `claude -p`
+  com `--allowedTools Bash`, sessão gráfica passada ao processo por
+  `WAYLAND_DISPLAY`, `DISPLAY`, `XDG_RUNTIME_DIR` e `DBUS_SESSION_BUS_ADDRESS`):
+  `iron init` gravou o hook em `.claude/settings.json` (matcher `Bash|PowerShell`)
+  e o `iron doctor` passou 9/9, inclusive o force push de teste barrado.
+  `git push --force` foi **negado** e o motivo do Iron Brake chegou ao modelo,
+  que o citou e não tentou alternativas; `echo` passou (`allow`). Um `rm -rf` fora
+  do projeto abriu a janela do `zenity`: **Executar** apagou o diretório (log:
+  `rm-outside-project`, `allow`, `dialog: approved`) e **Cancelar** o manteve, com
+  a recusa explicada ao modelo (`deny`, `dialog: rejected`). O log de auditoria
+  registrou cada decisão.
+- **Mesmo roteiro com o Claude Code real nas outras sessões, verificado em
+  2026-10-24/25** (mesma VM): **GNOME no X11** ("Ubuntu on Xorg"), **KDE Plasma
+  no X11** e **KDE Plasma no Wayland**. Em cada uma, um `rm -rf` fora do projeto
+  abriu a janela: **Executar** apagou o diretório (log: `rm-outside-project`,
+  `dialog: approved`) e, com outro aplicativo maximizado, **só o Enter** recusou
+  (`deny`, `dialog: rejected`, diretório mantido), então o botão padrão é o
+  Cancelar também nelas. **Observação, causa desconhecida:** no KDE/Wayland, na
+  primeira tentativa do Enter a janela ficou aberta e **sem resposta por 280 s**
+  (o Claude Code foi encerrado por tempo e o `zenity` ficou órfão, fechado à mão);
+  na repetição, idêntica, funcionou. Pode ter aberto atrás do aplicativo
+  maximizado ou sem foco para o teclado; não foi isolado. Em caso assim, o hook
+  espera até o `--timeout` da janela e a recusa por tempo vale como `deny`.
+- **Ainda não verificado:** vários monitores; tela cheia; se a janela abre por
+  cima das outras no KDE e no GNOME/X11 (só se confirmou a resposta, não a ordem
+  das janelas, e a causa da tentativa sem resposta acima); NixOS (o único caso
+  sem `/usr/bin/zenity` que importa).
 
 ## 4. Linha com plan e apply juntos é bloqueada (decisão mantida)
 
@@ -305,7 +329,8 @@ linha não passar de carona — e aí o Claude Code ainda pode perguntar.
   app em tela cheia (outro Space) e vários monitores.
 - **Janela atrás de outras no Linux (verificado em 2026-10-23, GNOME/Wayland):**
   o diálogo do `zenity` abriu por cima de outra janela aberta. No KDE e no
-  GNOME/X11 só a resposta aos cliques foi conferida, não a ordem das janelas.
+  GNOME/X11 foi conferida a resposta (cliques e Enter), não a ordem das janelas;
+  no KDE/Wayland uma tentativa com um aplicativo maximizado ficou sem resposta.
   Num gerenciador de janelas que impeça o foco (o Wayland pode recusar que um
   processo sem janela passe à frente), a janela pode abrir atrás e o hook
   esperar até o tempo esgotar, que conta como recusa.
@@ -524,7 +549,7 @@ Decisões tomadas depois da revisão:
     (o agente consultou o arquivo e não o removeu); ele foi verificado com o Git.
   - **Não verificado:** Kiro, Codex e Antigravity no Windows (só eventos
     simulados); o `terraform apply` destrutivo pelo agente real no Windows; o
-    `iron.exe` x64 (a máquina era ARM64); a janela de confirmação no Linux com o agente real (a janela em si foi verificada em quatro desktops, ver seção 3). O `install.sh` não roda no
+    `iron.exe` x64 (a máquina era ARM64); a ordem das janelas no Linux fora do GNOME/Wayland e o NixOS (a janela foi verificada em quatro desktops e com o Claude Code real em todos eles, ver seção 3). O `install.sh` não roda no
     Windows (instalação manual pelo `.exe`). O portão da AWS recusa funcionar lá.
 - **O `SHA256SUMS` vem da mesma release que o binário:** pega download
   corrompido, não release adulterada. A conferência contra adulteração é o
