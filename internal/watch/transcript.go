@@ -17,6 +17,11 @@ type Call struct {
 	At      time.Time // quando o agente a emitiu
 	DoneAt  time.Time // quando o resultado voltou; zero = ainda sem resultado
 
+	// Blocked: o próprio agente recusou a chamada (um hook negou) e o comando não
+	// rodou. Sem execução não há lacuna a acusar, mesmo que o hook do Iron Brake
+	// não tenha sido consultado (o Copilot para no primeiro deny).
+	Blocked bool
+
 	// Slack é quanto depois do DoneAt a decisão do hook ainda pode ser gravada.
 	// Zero: a decisão sempre vem antes do resultado. O Codex grava o resultado
 	// de uma chamada abandonada antes de o hook (esperando a janela) terminar, e
@@ -46,6 +51,7 @@ type block struct {
 type event struct {
 	calls   []Call
 	results map[string]time.Time // id da chamada → hora do resultado
+	blocked []string             // ids das chamadas que o agente recusou sem executar
 }
 
 // parseLine lê uma linha. Linha que não é JSON, ou de um tipo que não importa,
@@ -92,6 +98,7 @@ func parseAll(r io.Reader, parse parser) ([]Call, error) {
 
 	var calls []Call
 	results := map[string]time.Time{}
+	blocked := map[string]bool{}
 	for _, line := range bytes.Split(data, []byte("\n")) {
 		ev, ok := parse(line)
 		if !ok {
@@ -101,9 +108,13 @@ func parseAll(r io.Reader, parse parser) ([]Call, error) {
 		for id, at := range ev.results {
 			results[id] = at
 		}
+		for _, id := range ev.blocked {
+			blocked[id] = true
+		}
 	}
 	for i := range calls {
 		calls[i].DoneAt = results[calls[i].ID]
+		calls[i].Blocked = blocked[calls[i].ID]
 	}
 	return calls, nil
 }

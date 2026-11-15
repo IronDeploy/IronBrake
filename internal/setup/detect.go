@@ -28,17 +28,23 @@ var agentMarkers = []agentMarker{
 	{hook.Kiro.Name(), ".kiro", "kiro-cli"},
 	{hook.Antigravity.Name(), filepath.Join(".gemini", "antigravity-cli"), "agy"},
 	{hook.Codex.Name(), ".codex", "codex"},
+	{hook.Copilot.Name(), ".copilot", "copilot"},
 }
 
 // DetectAgents devolve os agentes que parecem estar nesta máquina, na ordem
-// fixa claude, kiro, antigravity, codex. lookPath é o exec.LookPath (trocável
-// nos testes). O CODEX_HOME, se definido, também vale como pasta do Codex.
+// fixa claude, kiro, antigravity, codex, copilot. lookPath é o exec.LookPath (trocável
+// nos testes). O CODEX_HOME e o COPILOT_HOME, se definidos, também valem como pasta do agente.
 func DetectAgents(home string, lookPath func(string) (string, error)) []Detected {
 	var found []Detected
 	for _, m := range agentMarkers {
 		dirs := []string{filepath.Join(home, m.dir)}
 		if m.agent == hook.Codex.Name() {
 			if custom := os.Getenv("CODEX_HOME"); custom != "" {
+				dirs = append(dirs, custom)
+			}
+		}
+		if m.agent == hook.Copilot.Name() {
+			if custom := os.Getenv("COPILOT_HOME"); custom != "" {
 				dirs = append(dirs, custom)
 			}
 		}

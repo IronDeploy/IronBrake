@@ -43,14 +43,15 @@ const usage = `uso: iron <subcomando>
 
   hook          roda como hook de pré-execução do agente (lê o evento pelo stdin; --agent=claude)
   init          instala o hook em .claude/settings.json da pasta atual e a etiqueta do agente na AWS; se achar outros agentes, pergunta
-  init --agent=a,b  instala nos agentes listados (claude, kiro, antigravity, codex); --agent=all instala em todos os detectados
+  init --agent=a,b  instala nos agentes listados (claude, kiro, antigravity, codex, copilot); --agent=all instala em todos os detectados
   init --agent=kiro  instala o hook do Kiro CLI (.kiro/agents e .kiro/hooks) na pasta atual
   init --agent=antigravity  instala o hook do Antigravity CLI (.agents/hooks.json) na pasta atual (apelido: agy)
   init --agent=codex  instala o hook do Codex CLI (.codex/hooks.json) na pasta atual; você ainda confia nele no Codex (/hooks)
+  init --agent=copilot  instala o hook do Copilot CLI (.github/hooks/iron-brake.json) na pasta atual; você ainda confia na pasta no Copilot
   init --no-aws-tag  instala só o hook, sem gravar AWS_SDK_UA_APP_ID no env do agente
   init --harden grava também regras deny de leitura das credenciais (Iron Shield)
   status        mostra, por agente, o que está instalado nesta pasta, o que foi verificado e os avisos (não executa o hook)
-  doctor        verifica se o hook desta pasta está mesmo protegendo (--agent=kiro, antigravity ou codex)
+  doctor        verifica se o hook desta pasta está mesmo protegendo (--agent=kiro, antigravity, codex ou copilot)
   scan          raio-X das credenciais ao alcance do agente (Iron Shield, só leitura)
   scan --manage igual, mas interativo: setas navegam, enter oculta/mostra, esc/q sai
   shield status mostra quais credenciais estão travadas e quais não estão
@@ -64,6 +65,9 @@ const usage = `uso: iron <subcomando>
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
+		if code, ok := runBareUnderCopilot(stdin, stdout, stderr); ok {
+			return code
+		}
 		fmt.Fprintln(stderr, usage)
 		return 2
 	}
@@ -463,6 +467,81 @@ func reportCodexAWSTag(dir string, stdout, stderr io.Writer) {
 	}
 }
 
+// runBareUnderCopilot trata o iron chamado SEM argumentos pelo Copilot CLI.
+// O Copilot executa também o hook de .claude/settings.json, mas ignora o "args"
+// dele (verificado com o 1.0.112): roda o programa sem o "hook", e o uso com
+// exit 2 faria o Copilot negar todo comando da pasta. O ambiente do Copilot
+// (COPILOT_CLI=1) e o stdin que não é terminal denunciam essa chamada. Se a
+// pasta já tem o hook do Copilot, ele cuida do comando e este sai em silêncio
+// (analisar de novo abriria duas janelas e gravaria duas linhas no log); sem
+// ele, o evento (já no formato do Claude) é analisado como em "iron hook".
+func runBareUnderCopilot(stdin io.Reader, stdout, stderr io.Writer) (int, bool) {
+	if os.Getenv("COPILOT_CLI") != "1" || isTerminal(stdin) {
+		return 0, false
+	}
+	dir := hook.ProjectDir(os.Getenv)
+	if dir == "" {
+		dir, _ = os.Getwd()
+	}
+	if hooks, err := setup.FindCopilot(dir); err == nil && len(hooks) > 0 {
+		_, _ = io.Copy(io.Discard, stdin)
+		return 0, true
+	}
+	return run([]string{"hook"}, stdin, stdout, stderr), true
+}
+
+// runInitCopilot instala o hook do Copilot CLI (.github/hooks/iron-brake.json).
+// O Copilot só carrega os hooks do repositório em pasta confiada, e no copilot -p
+// não pergunta: pula os hooks com um aviso. Por isso o init diz o que escolher.
+// A etiqueta da AWS não foi verificada no ambiente dele.
+func runInitCopilot(dir, exePath string, opts initOptions, stdout, stderr io.Writer) int {
+	if opts.harden {
+		fmt.Fprintln(stderr, "iron: --harden só vale para o Claude Code (usa regras de permissão dele)")
+		return 2
+	}
+	// O Copilot só lê .github/hooks da raiz do repositório: instalar numa subpasta
+	// criaria um hook que não roda, e a pessoa ficaria sem proteção sem saber.
+	if root := setup.GitRoot(dir); root != "" && root != filepath.Clean(dir) {
+		fmt.Fprintf(stderr, "iron: o Copilot só lê .github/hooks da raiz do repositório (%s), e esta pasta é uma subpasta dele: o hook não rodaria.\n", root)
+		fmt.Fprintf(stderr, "      rode: cd %s && iron init --agent=copilot\n", root)
+		return 2
+	}
+	state, err := setup.InstallCopilot(dir, exePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "iron: %v\n", err)
+		return 1
+	}
+	path := setup.CopilotHooksPath(dir)
+	switch state {
+	case setup.Installed:
+		fmt.Fprintf(stdout, "iron: hook do Copilot instalado em %s\n", path)
+	case setup.Updated:
+		fmt.Fprintf(stdout, "iron: hook do Copilot atualizado em %s (caminho, prazo ou version estavam diferentes)\n", path)
+	default:
+		fmt.Fprintf(stdout, "iron: o hook do Copilot já estava em %s\n", path)
+	}
+	reportCopilotTrust(dir, stdout)
+	if opts.awsTag {
+		fmt.Fprintf(stdout, "iron: para o CloudTrail distinguir este agente, exporte %s=%s no terminal antes de abrir o copilot (o Copilot não tem onde gravar isso; ele repassa o ambiente aos comandos).\n", awsTagVar, hook.Copilot.Capabilities().AppID)
+	}
+	if !setup.IsIronBinaryName(exePath) {
+		fmt.Fprintf(stderr, "iron: aviso: o programa se chama %q; o hook funciona, mas o iron doctor só o reconhece se o arquivo se chamar iron (ou iron.exe).\n", filepath.Base(exePath))
+	}
+	return 0
+}
+
+// reportCopilotTrust diz o que falta para o Copilot rodar o hook: confiar na
+// pasta. Só fica calado quando a pasta já está em trustedFolders.
+func reportCopilotTrust(dir string, stdout io.Writer) {
+	home, _ := os.UserHomeDir()
+	if trust, err := setup.ReadCopilotTrust(setup.CopilotConfigPath(home), dir); err == nil && trust.FolderTrusted {
+		fmt.Fprintln(stdout, "iron: a pasta já está confiada no Copilot")
+		return
+	}
+	fmt.Fprintln(stdout, "iron: ATENÇÃO: o Copilot NÃO roda este hook até você confiar na pasta, e o copilot -p não pergunta: ele pula os hooks e o comando passa.")
+	fmt.Fprintln(stdout, `      Abra o copilot nesta pasta e escolha "Yes, and remember this folder for future sessions". Confira com: iron doctor --agent=copilot`)
+}
+
 // runInitAntigravity instala o hook do Antigravity CLI (.agents/hooks.json). O
 // shield é do Claude, e a etiqueta da AWS não foi verificada no ambiente dele.
 func runInitAntigravity(dir, exePath string, opts initOptions, stdout, stderr io.Writer) int {
@@ -785,6 +864,8 @@ func doctorHere(args []string, stdout, stderr io.Writer) int {
 		return runDoctorAntigravity(dir, stdout)
 	case hook.Codex.Name():
 		return runDoctorCodex(dir, stdout)
+	case hook.Copilot.Name():
+		return runDoctorCopilot(dir, stdout)
 	}
 	if _, err := os.Stat(setup.SettingsPath(dir)); err != nil {
 		if _, kiroErr := os.Stat(filepath.Join(dir, ".kiro")); kiroErr == nil {
@@ -814,6 +895,22 @@ func runDoctorCodex(dir string, stdout io.Writer) int {
 	home, _ := os.UserHomeDir()
 	extra.Coverage = watchCoverage(hook.Codex.Name(), dir, home, setup.CodexHooksPath(dir), extra.Log.Entries)
 	results := doctor.RunCodex(dir, codexConfigPath(), version, doctorTimeout, extra)
+	doctor.Print(stdout, results)
+	if !doctor.AllOK(results) {
+		return 1
+	}
+	return 0
+}
+
+func runDoctorCopilot(dir string, stdout io.Writer) int {
+	extra := doctor.Extra{
+		Log:        audit.Log{Path: audit.DefaultPath()},
+		ConfigPath: toolpath.ConfigPath(),
+		ProjectDir: dir,
+	}
+	home, _ := os.UserHomeDir()
+	extra.Coverage = watchCoverage(hook.Copilot.Name(), dir, home, setup.CopilotHooksPath(dir), extra.Log.Entries)
+	results := doctor.RunCopilot(dir, setup.CopilotConfigPath(home), version, doctorTimeout, extra)
 	doctor.Print(stdout, results)
 	if !doctor.AllOK(results) {
 		return 1

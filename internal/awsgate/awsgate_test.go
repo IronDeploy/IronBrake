@@ -106,6 +106,8 @@ func TestDetectAgent(t *testing.T) {
 		{"/Applications/Kiro CLI.app/Contents/MacOS/kiro-cli chat", "kiro"},
 		{"/opt/homebrew/bin/kiro-cli-chat chat", "kiro"},
 		{"/usr/local/bin/codex exec", "codex"},
+		{"/opt/homebrew/Caskroom/copilot-cli/1.0.112/copilot -p oi", "copilot"},
+		{"node /usr/local/lib/node_modules/@github/copilot/index.js", "copilot"},
 		{"cursor-agent --print", "cursor"},
 		{"python3 /x/claude.py", "claude"},
 

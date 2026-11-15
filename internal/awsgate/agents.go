@@ -13,6 +13,7 @@ var knownAgents = map[string]string{
 	"kiro-cli-chat": "kiro",
 	"gemini":        "gemini",
 	"codex":         "codex",
+	"copilot":       "copilot",
 	"cursor-agent":  "cursor",
 }
 
@@ -23,6 +24,7 @@ var knownPackages = map[string]string{
 	"claude-code": "claude",
 	"gemini-cli":  "gemini",
 	"codex":       "codex",
+	"copilot":     "copilot",
 	"kiro-cli":    "kiro",
 }
 

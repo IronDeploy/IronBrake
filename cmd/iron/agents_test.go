@@ -42,6 +42,7 @@ func TestParseInitAgents(t *testing.T) {
 		{[]string{"--agent=kiro"}, []string{"kiro"}},
 		{[]string{"--agent", "codex"}, []string{"codex"}},
 		{[]string{"--agent=kiro,codex"}, []string{"kiro", "codex"}},
+		{[]string{"--agent=COPILOT", "--agent=claude"}, []string{"copilot", "claude"}},
 		{[]string{"--agent=agy", "--agent=KIRO", "--agent=antigravity"}, []string{"antigravity", "kiro"}},
 		{[]string{"--agent=claude, kiro,"}, []string{"claude", "kiro"}},
 		{[]string{"--agent=ALL"}, []string{"all"}},
@@ -132,6 +133,25 @@ func TestInitExplicitList(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "== Kiro CLI ==") || !strings.Contains(stdout.String(), "== Codex CLI ==") {
 		t.Errorf("com vários agentes cada um tem cabeçalho: %q", stdout.String())
+	}
+}
+
+func TestInitAllIncludesCopilot(t *testing.T) {
+	isolateCopilotHome(t)
+	dir := t.TempDir()
+	env := initEnv{dir: dir, exePath: testExe, home: homeWith(t, ".claude", ".copilot"), lookPath: noLookPath}
+
+	var stdout, stderr bytes.Buffer
+	if code := runInitAgents([]string{"--agent=all"}, env, &stdout, &stderr); code != 0 {
+		t.Fatalf("código %d: %s", code, stderr.String())
+	}
+	for _, f := range []string{".claude/settings.json", ".github/hooks/iron-brake.json"} {
+		if !exists(dir, f) {
+			t.Errorf("--agent=all deveria instalar em %s", f)
+		}
+	}
+	if !strings.Contains(stdout.String(), "== Copilot CLI ==") || !strings.Contains(stdout.String(), "remember this folder") {
+		t.Errorf("deveria mostrar o cabeçalho do Copilot e o que fazer com a confiança: %q", stdout.String())
 	}
 }
 
