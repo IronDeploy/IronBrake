@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/IronDeploy/IronBrake/internal/dialog"
 	"github.com/IronDeploy/IronBrake/internal/hook"
+	"github.com/IronDeploy/IronBrake/internal/setup"
 )
 
 // codexPayload monta o stdin no formato real do Codex CLI.
@@ -103,6 +105,7 @@ func TestRunHookCodexBrokenInputBlocks(t *testing.T) {
 
 func TestRunInitCodex(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", t.TempDir())
 
 	var stdout, stderr bytes.Buffer
 	if code := runInitCodex(dir, testExe, initOptions{awsTag: true}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "instalado") {
@@ -125,9 +128,9 @@ func TestRunInitCodex(t *testing.T) {
 		}
 	}
 
-	// segunda vez: nada muda, e não repete o aviso de confiança (o hook é o mesmo).
+	// segunda vez: nada muda, mas o aviso continua enquanto o hook não está confiado.
 	stdout.Reset()
-	if code := runInitCodex(dir, testExe, initOptions{awsTag: true}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "já estava") || strings.Contains(stdout.String(), "NÃO roda") {
+	if code := runInitCodex(dir, testExe, initOptions{awsTag: true}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "já estava") || !strings.Contains(stdout.String(), "NÃO roda") {
 		t.Errorf("segunda vez: %d %q", code, stdout.String())
 	}
 	// caminho novo: o hook muda e a confiança é pedida de novo.
@@ -170,5 +173,45 @@ func TestCodexConfigPath(t *testing.T) {
 	t.Setenv("CODEX_HOME", "")
 	if got := codexConfigPath(); !strings.HasSuffix(got, filepath.Join(".codex", "config.toml")) {
 		t.Errorf("sem CODEX_HOME vale ~/.codex: %q", got)
+	}
+}
+
+// O init olha o config.toml de verdade: avisa enquanto falta confiar (inclusive
+// com o hook já instalado) e fica quieto quando pasta e hook estão confiados.
+func TestRunInitCodexReportsRealTrust(t *testing.T) {
+	dir, home := t.TempDir(), t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	var stdout, stderr bytes.Buffer
+	run := func() string {
+		stdout.Reset()
+		if code := runInitCodex(dir, testExe, initOptions{}, &stdout, &stderr); code != 0 {
+			t.Fatalf("código %d: %q", code, stderr.String())
+		}
+		return stdout.String()
+	}
+	config := filepath.Join(home, "config.toml")
+
+	if out := run(); !strings.Contains(out, "NÃO roda") {
+		t.Errorf("sem confiança nenhuma deveria avisar: %q", out)
+	}
+	// só a pasta confiada: o hook ainda não roda.
+	body := fmt.Sprintf("[projects.%q]\ntrust_level = \"trusted\"\n", dir)
+	if err := os.WriteFile(config, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out := run(); !strings.Contains(out, "NÃO roda") {
+		t.Errorf("pasta confiada mas hook não: deveria avisar: %q", out)
+	}
+	// pasta e hook confiados.
+	hooks, err := setup.FindCodex(dir)
+	if err != nil || len(hooks) == 0 {
+		t.Fatalf("hook não encontrado: %v", err)
+	}
+	body += fmt.Sprintf("\n[hooks.state.%q]\ntrusted_hash = \"sha256:abc\"\n", hooks[0].Key)
+	if err := os.WriteFile(config, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out := run(); strings.Contains(out, "NÃO roda") || !strings.Contains(out, "já estão confiados") {
+		t.Errorf("tudo confiado: não deveria avisar: %q", out)
 	}
 }
