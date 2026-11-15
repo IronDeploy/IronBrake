@@ -1,0 +1,1 @@
+{"sessionId":"6d98532b-b665-4605-b886-c590d00181ab","timestamp":1794761305933,"cwd":"/home/dev/projeto","toolCallId":"call_0000000000000000000000","toolName":"bash","toolArgs":{"command":"echo iron-copilot-ok","description":"Run requested echo command"},"traceparent":"00-00000000000000000000000000000000-0000000000000000-01"}

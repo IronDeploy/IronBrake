@@ -9,23 +9,28 @@ import (
 	"testing"
 )
 
-// A amostra é o stdin real do Copilot CLI 1.0.112 (interativo), capturado em
-// 2026-11-15; só caminhos e identificadores foram trocados.
-func TestCopilotParseEventRealSample(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "testdata", "events", "copilot", "bash-interativo.json"))
-	if err != nil {
-		t.Fatal(err)
+// As amostras são o stdin real do Copilot CLI 1.0.112 (interativo e copilot -p),
+// capturado em 2026-11-15; só caminhos e identificadores foram trocados.
+func TestCopilotParseEventRealSamples(t *testing.T) {
+	cases := []struct{ file, session string }{
+		{"bash-interativo.json", "62b46c1b-54d4-4521-ae91-998e15cfeb59"},
+		{"bash-print.json", "6d98532b-b665-4605-b886-c590d00181ab"},
 	}
-	ev, err := Copilot.ParseEvent(bytes.NewReader(data))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := Event{
-		Command: "echo iron-copilot-ok", Tool: "bash", Shell: true,
-		SessionID: "62b46c1b-54d4-4521-ae91-998e15cfeb59", Cwd: "/home/dev/projeto",
-	}
-	if ev != want {
-		t.Errorf("evento inesperado: %+v", ev)
+	for _, c := range cases {
+		t.Run(c.file, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join("..", "..", "testdata", "events", "copilot", c.file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ev, err := Copilot.ParseEvent(bytes.NewReader(data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := Event{Command: "echo iron-copilot-ok", Tool: "bash", Shell: true, SessionID: c.session, Cwd: "/home/dev/projeto"}
+			if ev != want {
+				t.Errorf("evento inesperado: %+v", ev)
+			}
+		})
 	}
 }
 

@@ -317,7 +317,7 @@ func TestCollectCopilotUntrustedDoesNotProtect(t *testing.T) {
 	}
 
 	trustCopilot(t, in)
-	if c := byName(Collect(in), "copilot"); !c.Installed || len(c.Warnings) != 0 || c.Where != filepath.Join(".github", "hooks", "iron-brake.json") {
+	if c := byName(Collect(in), "copilot"); !c.Installed || len(c.Warnings) != 0 || c.Where != ".github/hooks/iron-brake.json" {
 		t.Errorf("confiado deveria estar saudável: %+v", c)
 	}
 }
