@@ -435,10 +435,7 @@ func runInitCodex(dir, exePath string, opts initOptions, stdout, stderr io.Write
 	default:
 		fmt.Fprintf(stdout, "iron: o hook do Codex já estava em %s\n", path)
 	}
-	if state != setup.Already {
-		fmt.Fprintln(stdout, "iron: ATENÇÃO: o Codex NÃO roda este hook até você confiar nele, e o codex exec não avisa. Abra o codex nesta pasta, confie na pasta e escolha")
-		fmt.Fprintln(stdout, "      \"Review hooks\" e confie no hook (tecla t), ou use /hooks. Depois abra uma sessão nova. Confira com: iron doctor --agent=codex")
-	}
+	reportCodexTrust(dir, stdout)
 	if opts.awsTag {
 		reportCodexAWSTag(dir, stdout, stderr)
 	}
@@ -528,6 +525,28 @@ func runInitCopilot(dir, exePath string, opts initOptions, stdout, stderr io.Wri
 		fmt.Fprintf(stderr, "iron: aviso: o programa se chama %q; o hook funciona, mas o iron doctor só o reconhece se o arquivo se chamar iron (ou iron.exe).\n", filepath.Base(exePath))
 	}
 	return 0
+}
+
+// reportCodexTrust diz o que falta para o Codex rodar o hook: confiar na pasta e
+// no hook (por hash). Olha o config.toml de verdade, então avisa também quando o
+// hook já estava instalado, e some quando tudo está confiado.
+func reportCodexTrust(dir string, stdout io.Writer) {
+	configPath := codexConfigPath()
+	trust, err := setup.ReadCodexTrust(configPath, dir)
+	hooks, _ := setup.FindCodex(dir)
+	ok := err == nil && trust.ProjectTrusted && len(hooks) > 0
+	for _, h := range hooks {
+		ok = ok && trust.TrustedHooks[h.Key]
+	}
+	if info, statErr := os.Stat(setup.CodexHooksPath(dir)); ok && statErr == nil && !trust.ConfigModTime.IsZero() && info.ModTime().After(trust.ConfigModTime) {
+		ok = false // o hooks.json mudou depois da última confiança gravada
+	}
+	if ok {
+		fmt.Fprintln(stdout, "iron: a pasta e o hook já estão confiados no Codex")
+		return
+	}
+	fmt.Fprintln(stdout, "iron: ATENÇÃO: o Codex NÃO roda este hook até você confiar nele, e o codex exec não avisa: o comando passa sem o Iron Brake. Abra o codex nesta pasta, confie na pasta e escolha")
+	fmt.Fprintln(stdout, "      \"Review hooks\" e confie no hook (tecla t), ou use /hooks. Depois abra uma sessão nova. Confira com: iron doctor --agent=codex")
 }
 
 // reportCopilotTrust diz o que falta para o Copilot rodar o hook: confiar na

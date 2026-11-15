@@ -761,6 +761,8 @@ verdade não foi rodado em Linux**. Não verificado: Windows, outras versões e 
   prazo) volta a exigir a confiança ("Modified since last trusted"). O doctor confere a presença das duas confianças e avisa quando o
   `hooks.json` é mais novo que a última gravação do `config.toml`; **não recalcula o hash** (o algoritmo não foi descoberto), então um hook
   alterado depois da confiança pode passar despercebido se o `config.toml` tiver sido gravado depois por outro motivo.
+  O `iron init --agent=codex` lê o mesmo `config.toml` e repete o aviso a cada execução enquanto faltar confiar (mesmo com o hook já
+  instalado); o `iron status` mostra "NÃO PROTEGE" e o `iron watch --agent=codex` acusa o comando que passou sem decisão.
 - **Os hooks carregam no início da sessão.** Confiar no meio de uma sessão só vale para as próximas. O chat usa um daemon compartilhado
   (`codex app-server daemon`); numa sessão nova ainda apareceu "hooks disabled until the project is trusted" até o daemon ser reiniciado
   (`codex app-server daemon restart`). O hook do chat roda no ambiente do **daemon**, não no do seu terminal.
