@@ -69,7 +69,7 @@ func NewTracker(src Source, grace time.Duration) *Tracker {
 // Add registra chamadas e resultados vistos no transcript.
 func (t *Tracker) Add(ev event) {
 	for _, c := range ev.calls {
-		if t.src.Keep != nil && !t.src.Keep(c) {
+		if c.Blocked || (t.src.Keep != nil && !t.src.Keep(c)) {
 			continue
 		}
 		if _, seen := t.pending[c.ID]; !seen {
@@ -82,6 +82,9 @@ func (t *Tracker) Add(ev event) {
 			c.DoneAt = at
 			t.pending[id] = c
 		}
+	}
+	for _, id := range ev.blocked {
+		delete(t.pending, id) // o Check ignora ids que não estão mais pendentes
 	}
 }
 

@@ -28,8 +28,8 @@ const watchUsage = `uso: iron watch [opções]
   --since DUR    com --once, o período conferido (padrão 1h; ex.: 30m, 24h)
   --dir PASTA    pasta de transcripts (padrão: ~/.claude/projects/<esta pasta>)
   --all          todas as pastas de ~/.claude/projects
-  --agent NOME   claude (padrão), antigravity, kiro ou codex: de qual agente ler os transcripts
-                 (nos três últimos a pasta é única para todos os projetos: só contam os comandos
+  --agent NOME   claude (padrão), antigravity, kiro, codex ou copilot: de qual agente ler os transcripts
+                 (nos quatro últimos a pasta é única para todos os projetos: só contam os comandos
                  desta pasta; --all: de todas)
   --notify       também avisa por notificação do sistema (macOS)
   --grace DUR    espera depois do resultado antes de acusar (padrão 3s)`
@@ -135,6 +135,7 @@ var watchSources = map[string]watchSource{
 	hook.Antigravity.Name(): {&watch.AntigravityFormat, watch.BrainDir, "as conversas do Antigravity"},
 	hook.Kiro.Name():        {&watch.KiroFormat, watch.KiroSessionsDir, "as sessões do Kiro"},
 	hook.Codex.Name():       {&watch.CodexFormat, watch.CodexSessionsDir, "as sessões do Codex"},
+	hook.Copilot.Name():     {&watch.CopilotFormat, watch.CopilotSessionsDir, "as sessões do Copilot"},
 }
 
 // watchDeps reúne o que o watch usa do mundo externo, para os testes trocarem.
@@ -250,6 +251,15 @@ func warnIfHookMissing(agent, cwd, home string, stderr io.Writer) {
 			return // arquivo ilegível: não dá para afirmar nada
 		}
 		fmt.Fprintf(stderr, "iron: aviso: o hook do Iron Brake não está em %s; todo comando desta pasta será acusado. rode \"iron init --agent=antigravity\".\n", setup.AntigravityHooksPath(cwd))
+		return
+	}
+	if agent == hook.Copilot.Name() {
+		if hooks, err := setup.FindCopilot(cwd); err == nil && len(hooks) > 0 {
+			return
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return // arquivo ilegível: não dá para afirmar nada
+		}
+		fmt.Fprintf(stderr, "iron: aviso: o hook do Iron Brake não está em %s; todo comando desta pasta será acusado. rode \"iron init --agent=copilot\".\n", setup.CopilotHooksPath(cwd))
 		return
 	}
 	if agent == hook.Kiro.Name() || agent == hook.Codex.Name() {

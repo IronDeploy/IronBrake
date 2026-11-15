@@ -785,8 +785,8 @@ verdade não foi rodado em Linux**. Não verificado: Windows, outras versões e 
 
 ## 22. Limites da detecção de agentes e do iron status
 
-- **Detecção** (`iron init`, `iron status`): a pasta do agente em `~/` (`.claude`, `.kiro`, `.gemini/antigravity-cli`, `.codex` ou o `CODEX_HOME`) ou o programa
-  no PATH (`claude`, `kiro-cli`, `agy`, `codex`). É um indício de que o agente existe, não de que funciona; a pasta `~/.gemini` sozinha (Gemini CLI antigo) não conta como
+- **Detecção** (`iron init`, `iron status`): a pasta do agente em `~/` (`.claude`, `.kiro`, `.gemini/antigravity-cli`, `.codex` ou o `CODEX_HOME`, `.copilot` ou o `COPILOT_HOME`) ou o programa
+  no PATH (`claude`, `kiro-cli`, `agy`, `codex`, `copilot`). É um indício de que o agente existe, não de que funciona; a pasta `~/.gemini` sozinha (Gemini CLI antigo) não conta como
   Antigravity. Um agente que o Iron Brake não conhece não é detectado.
 - **`iron init` sem `--agent`** pergunta por cada outro agente detectado e ainda não instalado na pasta, **só num terminal de verdade** (`/dev/null` e pipe contam como sem
   terminal e só mostram o comando). Verificado num terminal real (tmux) e em Linux; a resposta em branco é "não". Se um instalador falhar, os outros continuam e o código
@@ -816,3 +816,41 @@ Leitores verificados com transcripts reais (Kiro 2.26.1, Codex 0.159.3) em 2026-
 - **As sessões de todos os projetos ficam numa pasta só** (como no Antigravity): só contam as chamadas cujo diretório está dentro da pasta atual; `--all` tira o filtro.
 - **Não vê** o que o agente executa fora do transcript, nem o que o transcript não registra (o agente escreve esses arquivos; um agente comprometido poderia alterá-los).
 
+## 24. Limites do Copilot CLI
+
+Verificado com o Copilot CLI **1.0.112** (macOS), em 2026-11-15, com o agente real e o `iron` real: bloqueio de `git push --force` e liberação de `git status`
+no modo interativo e no `copilot -p`; janela de confirmação (Executar roda o comando, Cancelar o bloqueia); prazo de 600 s; `agent: copilot` no log;
+`iron doctor --agent=copilot`; `iron watch --agent=copilot`; a etiqueta da AWS nos comandos. **Não verificado:** Linux, Windows, outras versões e outros
+modelos (só um modelo foi usado).
+
+- **O hook só roda em pasta confiada, e o `copilot -p` pula os hooks sem perguntar.** O aviso é "Skipped repository hooks (.github/hooks) because the folder is not
+  trusted" e o comando passa sem o Iron Brake (**provado**, com o `copilot -p` numa pasta não confiada). No modo interativo o Copilot pergunta "Do you trust the files in
+  this folder?" e a opção **"2. Yes, and remember this folder for future sessions"** grava a pasta em `trustedFolders` do `config.json`; a opção 1 vale só para a sessão e
+  não deixa rastro. O `iron doctor` e o `iron status` leem a lista e comparam a pasta **exatamente**: uma subpasta de uma pasta confiada pode aparecer como não
+  confiada sem estar (na verificação, o Copilot carregou o hook numa subpasta de uma pasta confiada; a regra de herança não foi mapeada). `COPILOT_ALLOW_ALL=true`
+  também confia na pasta, mas aprova todas as ferramentas.
+- **O Copilot só lê `.github/hooks` da raiz do repositório.** Com o hook numa subpasta (`pkg/.github/hooks`) o comando passou sem o Iron Brake; com o hook na raiz e
+  o Copilot aberto em `pkg/`, o force push foi bloqueado. O `iron init --agent=copilot` recusa uma subpasta de repositório (exit 2) e o `doctor` e o `status` avisam.
+- **Prazo.** Sem `timeoutSec` o padrão é **30 s** e, estourado, o Copilot mata o hook e **libera o comando** (**provado**: hook de teste de 45 s, liberado aos 32 s); com
+  `timeoutSec` 120 o hook de 45 s foi respeitado. O `iron init` grava 600; o `doctor` e o `status` reprovam um arquivo sem o campo ou com menos de 570 s.
+- **Como o Copilot responde ao hook.** O JSON `permissionDecision: "deny"` com `permissionDecisionReason` (exit 0) bloqueia, e o motivo chega ao modelo. Saída vazia
+  deixa a decisão para a permissão do agente. No `preToolUse` qualquer saída diferente de 0 também bloqueia (ao contrário do Codex). O Iron Brake **não usa o `ask` do
+  Copilot** (não foi verificado; em autopilot ele vira deny): pergunta na própria janela e, sem janela, bloqueia.
+- **Vários hooks: sequência, e o primeiro `deny` encerra.** Hooks em arquivos diferentes de `.github/hooks` rodam em sequência. Um `allow` de outro hook, antes ou depois do
+  nosso, **não** derruba o `deny` do Iron Brake (verificado nos dois lados). Um `deny` de outro hook que rode antes impede o Iron Brake de ser consultado (o comando
+  também não executa, mas o log não tem a decisão): o `iron watch` ignora chamadas que o Copilot recusou (`error.code: "denied"`).
+- **O Copilot executa também o hook de `.claude/settings.json`, ignorando o `args`.** Com o hook do Claude do Iron Brake na pasta, o Copilot rodava o `iron` **sem
+  argumentos** (o `iron` imprimia o uso e saía com 2), e o Copilot **negava todo comando**, até o `git status` (**provado**). Hoje o `iron` sem argumentos, quando
+  roda sob o Copilot (`COPILOT_CLI=1`) e com o stdin que não é terminal, sai em silêncio se a pasta tem o hook do Copilot (ele já analisa o comando: sem isso seriam duas
+  janelas e duas linhas no log) e, sem o hook do Copilot, analisa o evento como o `iron hook` (a pasta fica protegida; o log mostra `agent: claude` e o Copilot mostra só
+  "hook exited with code 2" ao bloquear, sem o motivo). Um `iron` antigo, de antes dessa regra, continua negando tudo: atualize o binário.
+- **Só as ferramentas `bash` e `powershell` são cobertas** (a PowerShell não foi verificada no Windows). Edição de arquivos (`edit`, `create`), `web_fetch`, MCP e subagentes
+  (`task`) não passam pela análise de comandos.
+- **Ambiente do hook.** O Copilot define `CLAUDE_PROJECT_DIR`, `COPILOT_PROJECT_DIR` e `COPILOT_HOOK_DIR` (raiz do projeto e pasta dos hooks, nenhuma documentada) e
+  `COPILOT_CLI=1`. O `iron` usa o `cwd` do evento e o `CLAUDE_PROJECT_DIR`.
+- **Etiqueta da AWS:** o Copilot não tem onde gravá-la por projeto; ele repassa o ambiente aos comandos (verificado: `AWS_SDK_UA_APP_ID=iron-copilot` chegou ao `bash`).
+  O `iron init` só informa o `export` para fazer antes de abrir o `copilot`. Não verificado com chamadas reais à AWS.
+- **`iron watch --agent=copilot`** lê `~/.copilot/session-state/<sessão>/events.jsonl`; a pasta da chamada vem do `workspace.yaml` (formato em [watch.md](watch.md)). Se a
+  pasta da sessão mudar durante a conversa, vale a do `workspace.yaml`.
+- **Fora do escopo:** `--harden` (usa regras de permissão do Claude). Hooks de usuário (`~/.copilot/hooks`) e de política (`/etc/github-copilot/policy.d/`) não são
+  instalados nem lidos pelo `doctor`; o Copilot do **GitHub cloud agent** (que só carrega `.github/hooks` do repositório clonado) não foi testado.

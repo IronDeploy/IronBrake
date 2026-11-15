@@ -25,6 +25,7 @@ var Verified = map[string]string{
 	hook.Kiro.Name():        "Kiro CLI 2.26.1",
 	hook.Antigravity.Name(): "Antigravity CLI 1.2.14",
 	hook.Codex.Name():       "Codex CLI 0.159.3",
+	hook.Copilot.Name():     "Copilot CLI 1.0.112",
 }
 
 // Display é o nome para mostrar.
@@ -33,22 +34,24 @@ var Display = map[string]string{
 	hook.Kiro.Name():        "Kiro CLI",
 	hook.Antigravity.Name(): "Antigravity CLI",
 	hook.Codex.Name():       "Codex CLI",
+	hook.Copilot.Name():     "Copilot CLI",
 }
 
 // Order é a ordem em que os agentes aparecem.
-var Order = []string{hook.Claude.Name(), hook.Kiro.Name(), hook.Antigravity.Name(), hook.Codex.Name()}
+var Order = []string{hook.Claude.Name(), hook.Kiro.Name(), hook.Antigravity.Name(), hook.Codex.Name(), hook.Copilot.Name()}
 
 // LastWindow é quanto o status olha para trás à procura da última decisão.
 const LastWindow = 30 * 24 * time.Hour
 
 // Input reúne o que o status lê do mundo externo, para os testes trocarem.
 type Input struct {
-	Dir         string
-	Home        string
-	CodexConfig string // ~/.codex/config.toml
-	LookPath    func(string) (string, error)
-	Entries     func(since time.Time) ([]audit.Entry, error)
-	Now         time.Time
+	Dir           string
+	Home          string
+	CodexConfig   string // ~/.codex/config.toml
+	CopilotConfig string // ~/.copilot/config.json
+	LookPath      func(string) (string, error)
+	Entries       func(since time.Time) ([]audit.Entry, error)
+	Now           time.Time
 }
 
 // Agent é a situação de um agente.
@@ -91,6 +94,8 @@ func Collect(in Input) []Agent {
 			probeAntigravity(in, &a)
 		case hook.Codex.Name():
 			probeCodex(in, &a)
+		case hook.Copilot.Name():
+			probeCopilot(in, &a)
 		}
 		a.Last = lastDecision(entries, name)
 		agents = append(agents, a)
@@ -293,6 +298,46 @@ func probeCodex(in Input, a *Agent) {
 		a.warn("NÃO PROTEGE: o hook ainda não foi confiado no Codex (Review hooks → t, ou /hooks): ele não o roda")
 	case statErr == nil && !trust.ConfigModTime.IsZero() && info.ModTime().After(trust.ConfigModTime):
 		a.Warnings = append(a.Warnings, "o hooks.json foi alterado depois da última confiança gravada: se o hook mudou, o Codex não o roda até você confiar de novo (/hooks)")
+	}
+}
+
+func probeCopilot(in Input, a *Agent) {
+	hooks, err := setup.FindCopilot(in.Dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return
+	case err != nil:
+		a.Warnings = append(a.Warnings, err.Error())
+		return
+	}
+	if len(hooks) == 0 {
+		return
+	}
+	a.Installed, a.Where = true, rel(in.Dir, hooks[0].File)
+
+	minimum := hook.Copilot.Capabilities().Budget().Deadline.Seconds() + 10
+	for _, h := range hooks {
+		switch {
+		case h.Timeout == 0:
+			a.Warnings = append(a.Warnings, "sem timeoutSec o padrão do Copilot é 30 s: ele mata o hook e LIBERA o comando")
+		case h.Timeout < minimum:
+			a.Warnings = append(a.Warnings, fmt.Sprintf("prazo de %g s (mínimo %g s): o Copilot mata o hook e LIBERA o comando", h.Timeout, minimum))
+		}
+		if w := missingBinary(h.Exe); w != "" {
+			a.warn(w)
+		}
+	}
+
+	// O Copilot só lê .github/hooks da raiz do repositório.
+	if root := setup.GitRoot(in.Dir); root != "" && root != filepath.Clean(in.Dir) {
+		a.warn("NÃO PROTEGE: esta pasta é uma subpasta do repositório " + root + " e o Copilot só lê .github/hooks da raiz")
+	}
+	trust, err := setup.ReadCopilotTrust(in.CopilotConfig, in.Dir)
+	switch {
+	case err != nil:
+		a.Warnings = append(a.Warnings, "não consegui ler "+in.CopilotConfig+": "+err.Error())
+	case !trust.FolderTrusted:
+		a.warn(`NÃO PROTEGE no copilot -p: a pasta não está em trustedFolders e o Copilot pula os hooks do projeto (abra o copilot aqui e escolha "Yes, and remember this folder for future sessions")`)
 	}
 }
 

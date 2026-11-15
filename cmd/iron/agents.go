@@ -145,7 +145,7 @@ func resolveInitAgents(requested []string, detected []setup.Detected, env initEn
 			}
 		}
 		if len(names) == 0 {
-			fmt.Fprintln(stderr, "iron: --agent=all não achou nenhum agente nesta máquina; use --agent=NOME (claude, kiro, antigravity, codex)")
+			fmt.Fprintln(stderr, "iron: --agent=all não achou nenhum agente nesta máquina; use --agent=NOME (claude, kiro, antigravity, codex, copilot)")
 			return nil, 2
 		}
 		return names, 0
@@ -208,6 +208,8 @@ func runInitFor(name, dir, exePath string, opts initOptions, stdout, stderr io.W
 		return runInitAntigravity(dir, exePath, opts, stdout, stderr)
 	case hook.Codex.Name():
 		return runInitCodex(dir, exePath, opts, stdout, stderr)
+	case hook.Copilot.Name():
+		return runInitCopilot(dir, exePath, opts, stdout, stderr)
 	}
 	return runInit(dir, exePath, opts, stdout, stderr)
 }
@@ -223,7 +225,7 @@ func statusHere(stdout, stderr io.Writer) int {
 	log := audit.Log{Path: audit.DefaultPath()}
 	now := time.Now()
 	agents := status.Collect(status.Input{
-		Dir: dir, Home: home, CodexConfig: codexConfigPath(), LookPath: exec.LookPath,
+		Dir: dir, Home: home, CodexConfig: codexConfigPath(), CopilotConfig: setup.CopilotConfigPath(home), LookPath: exec.LookPath,
 		Entries: log.Entries, Now: now,
 	})
 	status.Print(stdout, dir, agents, now)

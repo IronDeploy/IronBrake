@@ -35,7 +35,10 @@ func fakeIron(t *testing.T) string {
 func input(t *testing.T, dir string) Input {
 	t.Helper()
 	home := t.TempDir()
-	return Input{Dir: dir, Home: home, CodexConfig: filepath.Join(home, ".codex", "config.toml"), LookPath: noPath, Now: now}
+	return Input{
+		Dir: dir, Home: home, CodexConfig: filepath.Join(home, ".codex", "config.toml"),
+		CopilotConfig: filepath.Join(home, ".copilot", "config.json"), LookPath: noPath, Now: now,
+	}
 }
 
 func byName(agents []Agent, name string) Agent {
@@ -61,6 +64,22 @@ func installAll(t *testing.T, dir, exe string) {
 	if _, err := setup.InstallCodex(dir, exe); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := setup.InstallCopilot(dir, exe); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// trustCopilot grava o config.json do usuário com a pasta em trustedFolders,
+// como a opção "remember this folder" do Copilot.
+func trustCopilot(t *testing.T, in Input) {
+	t.Helper()
+	body := fmt.Sprintf("// This file is managed automatically.\n{\"trustedFolders\":[%q]}\n", in.Dir)
+	if err := os.MkdirAll(filepath.Dir(in.CopilotConfig), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(in.CopilotConfig, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func trustCodex(t *testing.T, in Input) {
@@ -81,15 +100,15 @@ func trustCodex(t *testing.T, in Input) {
 func TestCollectNothingInstalled(t *testing.T) {
 	in := input(t, t.TempDir())
 	agents := Collect(in)
-	if len(agents) != 4 {
-		t.Fatalf("esperava 4 agentes, obtive %d", len(agents))
+	if len(agents) != 5 {
+		t.Fatalf("esperava 5 agentes, obtive %d", len(agents))
 	}
 	for _, a := range agents {
 		if a.Installed || a.Detected || len(a.Warnings) != 0 || a.Last != nil {
 			t.Errorf("nada deveria estar instalado: %+v", a)
 		}
 	}
-	for i, name := range []string{"claude", "kiro", "antigravity", "codex"} {
+	for i, name := range []string{"claude", "kiro", "antigravity", "codex", "copilot"} {
 		if agents[i].Name != name {
 			t.Errorf("ordem: posição %d é %s, quero %s", i, agents[i].Name, name)
 		}
@@ -101,6 +120,7 @@ func TestCollectAllInstalledAndHealthy(t *testing.T) {
 	in := input(t, dir)
 	installAll(t, dir, fakeIron(t))
 	trustCodex(t, in)
+	trustCopilot(t, in)
 
 	for _, a := range Collect(in) {
 		if !a.Installed || len(a.Warnings) != 0 || a.Where == "" {
@@ -203,6 +223,7 @@ func TestCollectMissingBinaryWarns(t *testing.T) {
 	in := input(t, dir)
 	installAll(t, dir, filepath.Join(t.TempDir(), "iron")) // o arquivo não existe
 	trustCodex(t, in)
+	trustCopilot(t, in)
 	for _, a := range Collect(in) {
 		if !a.Unprotected || !a.Installed || len(a.Warnings) == 0 || !strings.Contains(strings.Join(a.Warnings, " "), "não existe") {
 			t.Errorf("%s deveria avisar do programa que não existe: %+v", a.Name, a)
@@ -257,7 +278,7 @@ func TestPrint(t *testing.T) {
 		"Claude Code", "instalado em .claude/settings.json", "verificado com Claude Code 2.1.286",
 		"git push → deny (git-force-push)",
 		"Antigravity CLI", "detectado nesta máquina, não instalado aqui: iron init --agent=antigravity",
-		"NÃO PROTEGE", "Protegendo esta pasta: 2 de 4", "iron doctor --agent=NOME",
+		"NÃO PROTEGE", "Protegendo esta pasta: 2 de 5", "iron doctor --agent=NOME",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("a saída deveria conter %q:\n%s", want, text)
@@ -280,5 +301,67 @@ func TestInstalledHelper(t *testing.T) {
 	}
 	if !Installed(dir, "kiro") || Installed(dir, "codex") {
 		t.Error("só o kiro está instalado")
+	}
+}
+
+func TestCollectCopilotUntrustedDoesNotProtect(t *testing.T) {
+	dir := t.TempDir()
+	in := input(t, dir)
+	if _, err := setup.InstallCopilot(dir, fakeIron(t)); err != nil {
+		t.Fatal(err)
+	}
+	c := byName(Collect(in), "copilot")
+	if !c.Installed || !c.Unprotected || !strings.Contains(strings.Join(c.Warnings, " "), "trustedFolders") ||
+		!strings.Contains(strings.Join(c.Warnings, " "), "remember this folder") {
+		t.Errorf("sem confiança o Copilot não roda o hook no -p: %+v", c)
+	}
+
+	trustCopilot(t, in)
+	if c := byName(Collect(in), "copilot"); !c.Installed || len(c.Warnings) != 0 || c.Where != filepath.Join(".github", "hooks", "iron-brake.json") {
+		t.Errorf("confiado deveria estar saudável: %+v", c)
+	}
+}
+
+func TestCollectCopilotTimeoutWarns(t *testing.T) {
+	dir := t.TempDir()
+	in := input(t, dir)
+	trustCopilot(t, in)
+	path := setup.CopilotHooksPath(dir)
+	if _, err := setup.InstallCopilot(dir, fakeIron(t)); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	for name, edited := range map[string]string{
+		"sem timeoutSec": strings.Replace(string(data), `"timeoutSec": 600`, `"x": 1`, 1),
+		"30 s":           strings.Replace(string(data), `"timeoutSec": 600`, `"timeoutSec": 30`, 1),
+	} {
+		if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		c := byName(Collect(in), "copilot")
+		if len(c.Warnings) != 1 || !strings.Contains(c.Warnings[0], "LIBERA") {
+			t.Errorf("%s: deveria avisar que o Copilot libera o comando: %+v", name, c)
+		}
+	}
+}
+
+// O Copilot só lê .github/hooks da raiz do repositório.
+func TestCollectCopilotHookInSubfolderDoesNotProtect(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(root, "pkg")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	in := input(t, sub)
+	trustCopilot(t, in)
+	if _, err := setup.InstallCopilot(sub, fakeIron(t)); err != nil {
+		t.Fatal(err)
+	}
+	c := byName(Collect(in), "copilot")
+	if !c.Unprotected || !strings.Contains(strings.Join(c.Warnings, " "), "subpasta") {
+		t.Errorf("hook em subpasta não protege: %+v", c)
 	}
 }

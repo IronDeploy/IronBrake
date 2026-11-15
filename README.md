@@ -1,7 +1,7 @@
 # Iron Brake
 
 O Iron Brake é um freio para agentes de IA no terminal. Ele roda como hook do
-agente (Claude Code, Kiro CLI, Antigravity CLI ou Codex CLI) e analisa cada comando **antes** de ele executar: libera o que é
+agente (Claude Code, Kiro CLI, Antigravity CLI, Codex CLI ou Copilot CLI) e analisa cada comando **antes** de ele executar: libera o que é
 seguro, pede sua confirmação para o que é arriscado e bloqueia o que destrói.
 
 ## Instalação (macOS e Linux)
@@ -91,11 +91,11 @@ comando rodou **sem nenhuma decisão** do Iron Brake:
 ```bash
 iron watch             # acompanha esta pasta e avisa na hora (--notify para notificação)
 iron watch --once      # confere a última hora e sai com código 1 se houver lacuna
-iron watch --agent=codex --once   # também: antigravity, kiro (o padrão é claude)
+iron watch --agent=codex --once   # também: antigravity, kiro, copilot (o padrão é claude)
 ```
 
-Só observa (não bloqueia). Lê os transcripts do Claude Code, do Kiro CLI, do Antigravity CLI e do Codex CLI
-(os três últimos guardam as sessões de todos os projetos numa pasta só: o `iron watch` confere só os comandos desta pasta).
+Só observa (não bloqueia). Lê os transcripts do Claude Code, do Kiro CLI, do Antigravity CLI, do Codex CLI e do Copilot CLI
+(os quatro últimos guardam as sessões de todos os projetos numa pasta só: o `iron watch` confere só os comandos desta pasta).
 O `iron doctor --agent=NOME` inclui o mesmo cruzamento. Detalhes e limites em [doc/watch.md](doc/watch.md).
 
 ## Portão de credenciais da AWS
@@ -189,15 +189,16 @@ normal ou pede que você mesmo rode o comando).
 | Kiro CLI (engines v2 e v3, uso interativo e v2 não interativo) | `iron init --agent=kiro` e `iron doctor --agent=kiro` | suportado, verificado com o Kiro CLI 2.26.1 em 2026-10-01 |
 | Antigravity CLI (`agy`), uso interativo e `-p` | `iron init --agent=antigravity` e `iron doctor --agent=antigravity` | suportado, verificado com o Antigravity CLI 1.2.14 em 2026-10-01 |
 | Codex CLI, chat e `codex exec` | `iron init --agent=codex` e `iron doctor --agent=codex` | suportado, verificado com o Codex CLI 0.159.3 em 2026-10-01, **depois de você confiar no hook** (veja abaixo) |
+| Copilot CLI, interativo e `-p` | `iron init --agent=copilot` e `iron doctor --agent=copilot` | suportado, verificado com o Copilot CLI 1.0.112 em 2026-11-15 (macOS), **depois de você confiar na pasta** (veja abaixo) |
 | Kiro CLI v3 com `--no-interactive` | | **não suportado**: o Kiro não executa hooks nesse modo |
 | Kiro IDE | | **não suportado**: o hook do IDE não recebe o comando |
 
 **Instalar em mais de um agente.** `iron init` sem opções instala o hook do Claude Code (como sempre) e, se achar outros agentes
-nesta máquina (a pasta `~/.kiro`, `~/.gemini/antigravity-cli` ou `~/.codex`, ou o programa no PATH), **pergunta um por um**
+nesta máquina (a pasta `~/.kiro`, `~/.gemini/antigravity-cli`, `~/.codex` ou `~/.copilot`, ou o programa no PATH), **pergunta um por um**
 quando está num terminal e, sem terminal, só mostra o comando. `iron init --agent=kiro,codex` instala nos agentes listados
-(`claude`, `kiro`, `antigravity` ou `agy`, `codex`) e `iron init --agent=all` em todos os detectados; o `--harden` vale só para o Claude.
+(`claude`, `kiro`, `antigravity` ou `agy`, `codex`, `copilot`) e `iron init --agent=all` em todos os detectados; o `--harden` vale só para o Claude.
 `iron status` mostra, por agente, se o hook está instalado nesta pasta, com que versão ele foi verificado, a última decisão
-registrada e os avisos (hook não confiado no Codex, `hooks.json` inválido no Antigravity, programa que não existe...), sem executar
+registrada e os avisos (hook não confiado no Codex, pasta não confiada no Copilot, `hooks.json` inválido no Antigravity, programa que não existe...), sem executar
 o hook nem gravar no log. Para testar de verdade, rode `iron doctor --agent=NOME`.
 
 No Kiro, o `iron init` grava o hook nos dois formatos: dentro do agente (`.kiro/agents/`, o v2 só
@@ -212,6 +213,13 @@ arquivo fica). O agente só roda o hook de uma pasta em que você confiou, e **i
 `hooks.json` com JSON inválido**: o `iron doctor --agent=antigravity` confere isso. O Iron Brake nunca usa o
 "ask" do Antigravity (com a aprovação automática do agente ligada ele não segura nada): pergunta na própria
 janela e, sem janela, bloqueia. `iron watch --agent=antigravity` confere de fora se o hook está vendo os comandos. Limites na seção 20 do [doc/known-issues.md](doc/known-issues.md).
+
+No Copilot, o `iron init` grava `.github/hooks/iron-brake.json` (o resto dos arquivos de `.github/hooks` fica) com o prazo de 600 s: sem ele o
+padrão do Copilot é 30 s e, **estourado, o comando é liberado**. Rode o `iron init` na **raiz do repositório**: o Copilot só lê `.github/hooks` de lá, e
+o `init` recusa uma subpasta. O Copilot também só carrega os hooks do repositório numa **pasta confiada**, e o `copilot -p` não pergunta: ele pula os hooks
+com um aviso e o comando passa sem o Iron Brake. Por isso, depois do `init`, abra o `copilot` na pasta e escolha **"Yes, and remember this folder for future
+sessions"**; o `iron doctor --agent=copilot` confere (`trustedFolders` do `~/.copilot/config.json`). O Copilot executa também o hook de
+`.claude/settings.json`: o `iron` reconhece essa chamada e não analisa o mesmo comando duas vezes. Limites na seção 24 do [doc/known-issues.md](doc/known-issues.md).
 
 ## Iron Shield: o que o agente enxerga
 
@@ -244,7 +252,7 @@ caminho do agente. Detalhes e tabela completa em [doc/iron-shield.md](doc/iron-s
 
 **Escopo**
 
-- Só enxerga comandos de terminal (a ferramenta Bash do Claude Code; no Kiro, a ferramenta de shell).
+- Só enxerga comandos de terminal (a ferramenta Bash do Claude Code; no Kiro, a ferramenta de shell; no Copilot, `bash` e `powershell`).
   Arquivos editados, chamadas de MCP e APIs não passam por ele.
 - Não substitui permissões mínimas. Se o agente usa uma credencial que pode
   apagar o banco de produção, o banco está em risco: a credencial do agente

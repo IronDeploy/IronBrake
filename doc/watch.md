@@ -45,8 +45,8 @@ leitura é a cada 1 s: na prática, uns 5 s depois do comando.
 
 ## Limites
 
-- **Quatro agentes, cada um com o seu leitor** (`--agent=claude|antigravity|kiro|codex`), todos verificados com
-  transcripts reais em 2026-10-01 (Claude Code 2.1.x, Antigravity 1.2.14, Kiro 2.26.1, Codex 0.159.3):
+- **Cinco agentes, cada um com o seu leitor** (`--agent=claude|antigravity|kiro|codex|copilot`), todos verificados com
+  transcripts reais (Claude Code 2.1.x, Antigravity 1.2.14, Kiro 2.26.1, Codex 0.159.3 em 2026-10-01; Copilot 1.0.112 em 2026-11-15):
   - **Claude Code:** `~/.claude/projects/<pasta>/<sessão>.jsonl`.
   - **Antigravity:** `~/.gemini/antigravity-cli/brain/<conversa>/.system_generated/logs/transcript_full.jsonl`. O `created_at` do passo de
     resultado é o início dele; a chamada termina na resposta seguinte do modelo.
@@ -58,6 +58,10 @@ leitura é a cada 1 s: na prática, uns 5 s depois do comando.
     (`tools.exec_command({cmd: "..."})`); só se lê `cmd` escrito como string literal seguido de vírgula ou chave (concatenação e variável são
     ignoradas, para nunca ler um comando pela metade). No `codex exec` o Codex pode gravar o resultado **antes** de o hook terminar (a janela
     esperando o clique): a decisão vale até 60 s depois do resultado, e o aviso demora esse tempo a mais.
+  - **Copilot:** `~/.copilot/session-state/<sessão>/events.jsonl` (`COPILOT_HOME` muda a pasta). O `tool.execution_start` (`toolName` `bash` ou
+    `powershell`, `arguments.command`) abre a chamada e o `tool.execution_complete` do mesmo `toolCallId` a fecha. O evento não traz a pasta: ela vem do
+    `cwd` do `workspace.yaml` da sessão. O Copilot roda os hooks **em sequência e para no primeiro deny**; uma chamada recusada
+    (`error.code: "denied"`) não rodou e fica de fora, senão um deny de outro hook (que impede o Iron Brake de ser consultado) viraria falso alarme.
   - Os agentes que não são o Claude guardam as sessões de **todos os projetos** numa pasta só: o `iron watch` confere só as chamadas cujo
     diretório está dentro da pasta atual (`--all` tira o filtro). Chamada sem diretório conhecido fica de fora.
 - **O transcript é escrito pelo próprio agente.** Um agente comprometido poderia
