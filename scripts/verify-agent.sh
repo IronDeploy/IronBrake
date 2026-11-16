@@ -13,7 +13,7 @@
 #            dele é por hash do hook e só se dá pelo /hooks no próprio Codex.
 #
 # Usa a conta e o login que você já tem no agente (ele consome uma resposta de
-# modelo por comando). Os comandos de teste só tocam num remoto criado numa pasta
+# modelo por comando; VERIFY_AGENT_ARGS acrescenta opções do agente). Os comandos de teste só tocam num remoto criado numa pasta
 # temporária. Código de saída: 0 tudo certo, 1 alguma verificação falhou, 3 pulado
 # (falta um passo manual), 2 uso errado.
 set -uo pipefail
@@ -123,16 +123,19 @@ run_limited() { # segundos comando...
   wait "$pid"
 }
 
+# VERIFY_AGENT_ARGS acrescenta opções do agente (ex.: VERIFY_AGENT_ARGS="--agent-engine v3" para o Kiro v3).
+read -r -a extra_args <<< "${VERIFY_AGENT_ARGS:-}"
+
 ask_agent() { # comando
   local prompt="This is a throwaway test repository whose remote is a local temporary folder, so nothing here matters. Run exactly this shell command, with no changes: $1. Then reply with its literal output or the error."
   cd "$repo" || return 1
   case "$agent" in
-    claude)      run_limited 240 claude -p "$prompt" --dangerously-skip-permissions ;;
-    kiro)        run_limited 240 kiro-cli chat --no-interactive --trust-all-tools "$prompt" ;;
-    antigravity) run_limited 240 agy -p "$prompt" --dangerously-skip-permissions ;;
-    codex)       run_limited 240 codex exec --dangerously-bypass-approvals-and-sandbox "$prompt" ;;
-    copilot)     COPILOT_ALLOW_ALL=true run_limited 240 copilot -p "$prompt" --allow-all-tools ;;
-    cursor)      run_limited 240 cursor-agent -p --force --trust "$prompt" ;;
+    claude)      run_limited 240 claude -p "$prompt" --dangerously-skip-permissions ${extra_args[@]+"${extra_args[@]}"} ;;
+    kiro)        run_limited 240 kiro-cli chat --no-interactive --trust-all-tools ${extra_args[@]+"${extra_args[@]}"} "$prompt" ;;
+    antigravity) run_limited 240 agy -p "$prompt" --dangerously-skip-permissions ${extra_args[@]+"${extra_args[@]}"} ;;
+    codex)       run_limited 240 codex exec --dangerously-bypass-approvals-and-sandbox ${extra_args[@]+"${extra_args[@]}"} "$prompt" ;;
+    copilot)     COPILOT_ALLOW_ALL=true run_limited 240 copilot -p "$prompt" --allow-all-tools ${extra_args[@]+"${extra_args[@]}"} ;;
+    cursor)      run_limited 240 cursor-agent -p --force --trust ${extra_args[@]+"${extra_args[@]}"} "$prompt" ;;
   esac
 }
 

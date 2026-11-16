@@ -39,7 +39,7 @@ scripts/verify-agent.sh cursor       # também: claude, kiro, antigravity, copil
 O `verify-agent.sh` usa o agente **de verdade** que está instalado, com o seu login: cria um repositório e um remoto temporários, roda `iron init` e `iron doctor`, pede ao
 agente um `git status` e um `git push --force origin main`, e confere que (1) o force push **não mudou** o remoto e (2) o log de auditoria tem **uma** decisão por comando
 (`allow`, e `deny` com a regra `git-force-push`) com o nome do agente: duas linhas seriam um hook duplicado. Se o modelo recusar o force push sozinho, ele tenta de novo
-até 3 vezes. Sai com 0 (tudo certo), 1 (alguma verificação falhou) ou 3 (falta um passo manual).
+até 3 vezes. Sai com 0 (tudo certo), 1 (alguma verificação falhou) ou 3 (falta um passo manual). `VERIFY_AGENT_ARGS` acrescenta opções do agente (por exemplo `VERIFY_AGENT_ARGS="--agent-engine v3"` no Kiro 2.x). Uma versão que ainda não está instalada pode ser testada ao lado: ponha a pasta do binário novo no início do `PATH` só para o comando.
 
 **O que o script não cobre** (continua manual, nas seções de limites do [known-issues.md](known-issues.md)): a janela de confirmação (Executar e Cancelar), o uso interativo,
 Linux e Windows, e o que o agente faz fora do shell. O **Codex** só roda o hook depois de você confiar nele por hash, no próprio Codex: prepare uma pasta

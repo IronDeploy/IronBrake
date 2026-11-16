@@ -124,7 +124,7 @@ func checkKiroTimeouts(h setup.KiroHooks) Result {
 // testar por fora.
 func kiroLimits(h setup.KiroHooks) Result {
 	r := Result{Name: nameKiroLimit, OK: true}
-	r.Detail = "o Kiro v3 em modo não interativo (--no-interactive) não executa hooks: ali o Iron Brake não protege (issue kirodotdev/Kiro#11281); o Kiro IDE não envia o comando ao hook"
+	r.Detail = "o Kiro IDE só roda os hooks do projeto depois de você confiar na pasta (Restricted Mode os desativa); versões antigas do Kiro v3 com --no-interactive não executavam hooks (kirodotdev/Kiro#11281): se o iron watch acusar comandos sem decisão, atualize o Kiro"
 	if len(h.Doubled) > 0 {
 		r.Detail += "; " + strings.Join(h.Doubled, ", ") + " (formato v3) também tem o hook: no v3 ele roda duas vezes por comando"
 	}

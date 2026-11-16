@@ -2,8 +2,8 @@
 
 O hook decide **antes** de o comando rodar, mas não tem como saber se ele
 **deixou de rodar**: um agente que ignora o hook, uma configuração errada, ou um
-modo do agente em que o hook não carrega (por exemplo o Kiro CLI v3 não
-interativo) fazem o comando passar sem ninguém dizer
+modo do agente em que o hook não carrega (por exemplo o `copilot -p` numa pasta
+não confiada, ou o Kiro CLI v3 não interativo antes de ser corrigido) fazem o comando passar sem ninguém dizer
 nada. O `iron watch` fecha esse buraco.
 
 Ele lê o **transcript** do agente (que registra cada chamada de shell) e o **log de
@@ -85,7 +85,7 @@ leitura é a cada 1 s: na prática, uns 5 s depois do comando.
 ## Verificado com os outros agentes (2026-10-01)
 
 Com o `iron` real e transcripts reais, nas pastas de teste: **Kiro**, 4 comandos de sessões v2 e v3 com decisão; depois um `echo` no **v3 não
-interativo** (o Kiro não executa hooks) foi acusado como SEM decisão, com 0 entradas no log. **Codex**, 8 comandos: 7 com decisão (inclusive as
+interativo** (o Kiro 2.26.1 não executava hooks nesse modo; corrigido no 2.37.1) foi acusado como SEM decisão, com 0 entradas no log. **Codex**, 8 comandos: 7 com decisão (inclusive as
 chamadas da janela de confirmação, que só se cobrem com a folga de 60 s) e 1 sem decisão, o `exec` com o hook instalado e ainda não confiado.
 **Antigravity**, com o hook ativo todos cobertos, e com o hook desligado um `echo` acusado. Dois erros achados só com dados reais e corrigidos: o
 `working_dir` vazio do Kiro v2 e o resultado gravado antes da decisão no Codex.

@@ -689,7 +689,7 @@ func runInitKiro(dir, exePath string, opts initOptions, stdout, stderr io.Writer
 	for _, f := range res.Skipped {
 		fmt.Fprintf(stdout, "iron: %s está no formato v3; o .kiro/hooks já o cobre\n", f)
 	}
-	fmt.Fprintln(stdout, "iron: aviso: o Kiro CLI v3 em modo não interativo (--no-interactive) não executa hooks; ali o Iron Brake não protege.")
+	fmt.Fprintln(stdout, "iron: aviso: o Kiro IDE desativa os hooks do projeto em Restricted Mode: abra a pasta no IDE e confie nela (Manage, Trust), senão o comando passa sem o Iron Brake.")
 	if !setup.IsIronBinaryName(exePath) {
 		fmt.Fprintf(stderr, "iron: aviso: o programa se chama %q; o hook funciona, mas o iron doctor só o reconhece se o arquivo se chamar iron (ou iron.exe).\n", filepath.Base(exePath))
 	}
