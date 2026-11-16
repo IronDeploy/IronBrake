@@ -25,6 +25,32 @@ recente. A versão fica **dentro** do binário (`iron version`).
 `make clean` apaga só o `dist/`. O `bin/` nunca é apagado pelo Makefile: um
 hook que aponta para um binário que sumiu **não bloqueia nada**.
 
+## Retestar os agentes
+
+O Iron Brake só promete proteção com a versão do agente em que foi verificado (README, tabela "Agentes"; `iron status`). Os agentes se atualizam sozinhos, então
+antes de cada release:
+
+```bash
+scripts/check-agent-versions.sh      # versão mais nova de cada agente x a verificada; sai com 1 se há versão nova
+make build
+scripts/verify-agent.sh cursor       # também: claude, kiro, antigravity, copilot, codex
+```
+
+O `verify-agent.sh` usa o agente **de verdade** que está instalado, com o seu login: cria um repositório e um remoto temporários, roda `iron init` e `iron doctor`, pede ao
+agente um `git status` e um `git push --force origin main`, e confere que (1) o force push **não mudou** o remoto e (2) o log de auditoria tem **uma** decisão por comando
+(`allow`, e `deny` com a regra `git-force-push`) com o nome do agente: duas linhas seriam um hook duplicado. Se o modelo recusar o force push sozinho, ele tenta de novo
+até 3 vezes. Sai com 0 (tudo certo), 1 (alguma verificação falhou) ou 3 (falta um passo manual).
+
+**O que o script não cobre** (continua manual, nas seções de limites do [known-issues.md](known-issues.md)): a janela de confirmação (Executar e Cancelar), o uso interativo,
+Linux e Windows, e o que o agente faz fora do shell. O **Codex** só roda o hook depois de você confiar nele por hash, no próprio Codex: prepare uma pasta
+(`git init`, `iron init --agent=codex`, abra o `codex` nela e confie na pasta e no hook com `/hooks`) e rode `scripts/verify-agent.sh --dir ESSA_PASTA codex`.
+
+Quando um agente passa, registre a versão nova em **quatro** lugares: `scripts/agents.json` (`verified`), `internal/status/status.go` (`Verified`; um teste confere que os
+dois batem), a linha do agente na tabela do README (versão e data) e a seção do agente em `known-issues.md`. Quando falha, abra uma issue com o que mudou.
+
+Toda segunda-feira o workflow [`agent-versions.yml`](../.github/workflows/agent-versions.yml) roda o `check-agent-versions.sh` e abre uma issue "Retestar AGENTE VERSÃO" (com o
+label `verificacao`) para cada versão nova que ainda não tem uma. Ele só lê o npm e a API de casks do Homebrew; para rodar na hora: Actions, "Versões dos agentes", Run workflow.
+
 ## Publicar
 
 1. Crie o repositório `IronDeploy/IronBrake` no GitHub (é o endereço que

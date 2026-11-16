@@ -194,6 +194,9 @@ normal ou pede que você mesmo rode o comando).
 | Kiro CLI v3 com `--no-interactive` | | **não suportado**: o Kiro não executa hooks nesse modo |
 | Kiro IDE | | **não suportado**: o hook do IDE não recebe o comando |
 
+Os agentes se atualizam sozinhos, então a cada release eles são retestados de verdade (`scripts/verify-agent.sh`), e toda semana um workflow abre uma issue quando sai versão nova
+de algum deles. Como funciona e o que o reteste não cobre: [doc/release.md](doc/release.md).
+
 **Instalar em mais de um agente.** `iron init` sem opções instala o hook do Claude Code (como sempre) e, se achar outros agentes
 nesta máquina (a pasta `~/.kiro`, `~/.gemini/antigravity-cli`, `~/.codex`, `~/.copilot` ou `~/.cursor`, ou o programa no PATH), **pergunta um por um**
 quando está num terminal e, sem terminal, só mostra o comando. `iron init --agent=kiro,codex` instala nos agentes listados

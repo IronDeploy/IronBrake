@@ -26,7 +26,7 @@ var Verified = map[string]string{
 	hook.Antigravity.Name(): "Antigravity CLI 1.2.14",
 	hook.Codex.Name():       "Codex CLI 0.159.3",
 	hook.Copilot.Name():     "Copilot CLI 1.0.112",
-	hook.Cursor.Name():      "Cursor 3.30.14 e cursor-agent 2026.11.13",
+	hook.Cursor.Name():      "Cursor 3.30.14 e cursor-agent 2026.11.13-eacade1",
 }
 
 // Display é o nome para mostrar.
