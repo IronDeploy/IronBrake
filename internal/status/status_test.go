@@ -278,7 +278,7 @@ func TestPrint(t *testing.T) {
 	Print(&out, dir, Collect(in), now)
 	text := out.String()
 	for _, want := range []string{
-		"Claude Code", "instalado em .claude/settings.json", "verificado com Claude Code 2.1.286",
+		"Claude Code", "instalado em .claude/settings.json", "verificado com " + Verified["claude"],
 		"git push → deny (git-force-push)",
 		"Antigravity CLI", "detectado nesta máquina, não instalado aqui: iron init --agent=antigravity",
 		"NÃO PROTEGE", "Protegendo esta pasta: 3 de 6", "iron doctor --agent=NOME",

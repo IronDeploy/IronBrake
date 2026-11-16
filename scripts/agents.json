@@ -1,7 +1,7 @@
 {
   "claude": {
     "display": "Claude Code",
-    "verified": "2.1.286",
+    "verified": "2.1.306",
     "latest": { "npm": "@anthropic-ai/claude-code" }
   },
   "kiro": {
@@ -11,7 +11,7 @@
   },
   "antigravity": {
     "display": "Antigravity CLI",
-    "verified": "1.2.14",
+    "verified": "1.5.9",
     "latest": { "brew": "antigravity-cli" }
   },
   "codex": {

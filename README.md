@@ -185,10 +185,10 @@ normal ou pede que você mesmo rode o comando).
 
 | Agente | Instalar na pasta do projeto | Estado |
 |---|---|---|
-| Claude Code | `iron init` | suportado |
+| Claude Code | `iron init` | suportado, verificado com o Claude Code 2.1.306 em 2026-11-16 (macOS) e com o 2.1.288 no Windows em 2026-10-02 |
 | Kiro CLI (engines v2 e v3), uso interativo e não interativo | `iron init --agent=kiro` e `iron doctor --agent=kiro` | suportado, verificado com o Kiro CLI 2.26.1 em 2026-10-01 (v2 interativo e não interativo, v3 interativo) e com o 2.37.1 e o 3.3.0 em 2026-11-16 (v3 não interativo, com a janela de confirmação) |
 | Kiro IDE | `iron init --agent=kiro` (o mesmo `.kiro/hooks`) e `iron doctor --agent=kiro` | suportado, verificado com o Kiro IDE 1.4.178 em 2026-11-16 (macOS), **depois de você confiar na pasta** (sem confiar, o IDE nem executa comandos) |
-| Antigravity CLI (`agy`), uso interativo e `-p` | `iron init --agent=antigravity` e `iron doctor --agent=antigravity` | suportado, verificado com o Antigravity CLI 1.2.14 em 2026-10-01 |
+| Antigravity CLI (`agy`), uso interativo e `-p` | `iron init --agent=antigravity` e `iron doctor --agent=antigravity` | suportado, verificado com o Antigravity CLI 1.2.14 em 2026-10-01 (interativo e `-p`) e com o 1.5.9 em 2026-11-16 (`-p`) |
 | Codex CLI, chat e `codex exec` | `iron init --agent=codex` e `iron doctor --agent=codex` | suportado, verificado com o Codex CLI 0.159.3 em 2026-10-01, **depois de você confiar no hook** (veja abaixo) |
 | Copilot CLI, interativo e `-p` | `iron init --agent=copilot` e `iron doctor --agent=copilot` | suportado, verificado com o Copilot CLI 1.0.112 em 2026-11-15 (macOS), **depois de você confiar na pasta** (veja abaixo) |
 | Cursor (app e `cursor-agent`) | `iron init --agent=cursor` e `iron doctor --agent=cursor` | suportado, verificado com o Cursor 3.30.14 e o `cursor-agent` 2026.11.13 em 2026-11-16 (macOS) |
