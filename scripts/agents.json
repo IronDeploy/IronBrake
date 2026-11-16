@@ -1,0 +1,32 @@
+{
+  "claude": {
+    "display": "Claude Code",
+    "verified": "2.1.286",
+    "latest": { "npm": "@anthropic-ai/claude-code" }
+  },
+  "kiro": {
+    "display": "Kiro CLI",
+    "verified": "2.26.1",
+    "latest": { "brew": "kiro-cli" }
+  },
+  "antigravity": {
+    "display": "Antigravity CLI",
+    "verified": "1.2.14",
+    "latest": { "brew": "antigravity-cli" }
+  },
+  "codex": {
+    "display": "Codex CLI",
+    "verified": "0.159.3",
+    "latest": { "npm": "@openai/codex" }
+  },
+  "copilot": {
+    "display": "Copilot CLI",
+    "verified": "1.0.112",
+    "latest": { "npm": "@github/copilot" }
+  },
+  "cursor": {
+    "display": "Cursor (cursor-agent)",
+    "verified": "2026.11.13-eacade1",
+    "latest": { "brew": "cursor-cli" }
+  }
+}

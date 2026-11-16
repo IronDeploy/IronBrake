@@ -1,0 +1,63 @@
+name: Versões dos agentes
+
+# Toda semana compara a versão mais nova de cada agente com a versão com que o
+# Iron Brake foi verificado (scripts/agents.json) e abre uma issue de reteste para
+# cada versão nova. Só lê fontes públicas (npm e a API de casks do Homebrew).
+on:
+    schedule:
+    - cron: '17 12 * * 1'
+    workflow_dispatch:
+
+permissions:
+    contents: read
+    issues: write
+
+jobs:
+    check:
+        runs-on: ubuntu-24.04
+        steps:
+        - name: Checkout code
+          uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+          with:
+            persist-credentials: false
+        - name: Procurar versões novas
+          id: check
+          run: scripts/check-agent-versions.sh --json > novas.jsonl
+        - name: Abrir uma issue por versão nova
+          env:
+            GH_TOKEN: ${{ github.token }}
+            GH_REPO: ${{ github.repository }}
+          run: |
+            set -euo pipefail
+            # as versões vêm de fora (npm, Homebrew): nada delas entra num comando sem
+            # passar por variável e pelo filtro abaixo.
+            while IFS= read -r line; do
+              [ -n "$line" ] || continue
+              agent="$(jq -r '.agent' <<<"$line")"
+              display="$(jq -r '.display' <<<"$line")"
+              verified="$(jq -r '.verified' <<<"$line")"
+              latest="$(jq -r '.latest' <<<"$line")"
+              if ! [[ "$latest" =~ ^[0-9A-Za-z._+-]{1,40}$ && "$agent" =~ ^[a-z]{1,20}$ ]]; then
+                echo "::warning::versão ou agente com formato inesperado, ignorado: $agent"
+                continue
+              fi
+              title="Retestar $display $latest"
+              # uma issue por versão: aberta ou já fechada, não abre outra.
+              existing="$(gh issue list --state all --search "\"$title\" in:title" --json title --jq "map(select(.title == \"$title\")) | length")"
+              if [ "$existing" -gt 0 ]; then
+                echo "já existe: $title"
+                continue
+              fi
+              extra=""
+              if [ "$agent" = "codex" ]; then
+                extra=" O Codex só roda o hook numa pasta já confiada: use \`--dir PASTA\` (veja o cabeçalho do script)."
+              fi
+              body="O $display publicou a versão **$latest**; o Iron Brake foi verificado com a **$verified**.
+
+            1. Instale a versão nova e rode: \`make build && scripts/verify-agent.sh $agent\`.$extra
+            2. Se passar, atualize a versão em \`scripts/agents.json\` e em \`internal/status/status.go\`, a linha do agente na tabela do README e a seção do agente em \`doc/known-issues.md\`.
+            3. Se falhar, abra uma issue com o que mudou no agente (o contrato do hook, o payload, o prazo ou a confiança).
+
+            Aberta automaticamente por \`.github/workflows/agent-versions.yml\`. O que o script cobre e o que continua manual: \`doc/release.md\`."
+              gh issue create --title "$title" --label verificacao --body "$body"
+            done < novas.jsonl
