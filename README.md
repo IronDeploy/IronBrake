@@ -193,6 +193,7 @@ normal ou pede que você mesmo rode o comando).
 | Cursor (app e `cursor-agent`) | `iron init --agent=cursor` e `iron doctor --agent=cursor` | suportado, verificado com o Cursor 3.30.14 e o `cursor-agent` 2026.11.13 em 2026-11-16 (macOS) |
 | Kiro CLI v3 com `--no-interactive` | | **não suportado**: o Kiro não executa hooks nesse modo |
 | Kiro IDE | | **não suportado**: o hook do IDE não recebe o comando |
+| Gemini CLI | | **não suportado, por decisão**: o agente do Google que o Iron Brake cobre é o Antigravity CLI (linha acima). Ver a issue #23 |
 
 Os agentes se atualizam sozinhos, então a cada release eles são retestados de verdade (`scripts/verify-agent.sh`), e toda semana um workflow abre uma issue quando sai versão nova
 de algum deles. Como funciona e o que o reteste não cobre: [doc/release.md](doc/release.md).
