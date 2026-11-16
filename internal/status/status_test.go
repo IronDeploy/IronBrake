@@ -67,6 +67,9 @@ func installAll(t *testing.T, dir, exe string) {
 	if _, err := setup.InstallCopilot(dir, exe); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := setup.InstallCursor(dir, exe); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // trustCopilot grava o config.json do usuário com a pasta em trustedFolders,
@@ -100,15 +103,15 @@ func trustCodex(t *testing.T, in Input) {
 func TestCollectNothingInstalled(t *testing.T) {
 	in := input(t, t.TempDir())
 	agents := Collect(in)
-	if len(agents) != 5 {
-		t.Fatalf("esperava 5 agentes, obtive %d", len(agents))
+	if len(agents) != 6 {
+		t.Fatalf("esperava 6 agentes, obtive %d", len(agents))
 	}
 	for _, a := range agents {
 		if a.Installed || a.Detected || len(a.Warnings) != 0 || a.Last != nil {
 			t.Errorf("nada deveria estar instalado: %+v", a)
 		}
 	}
-	for i, name := range []string{"claude", "kiro", "antigravity", "codex", "copilot"} {
+	for i, name := range []string{"claude", "kiro", "antigravity", "codex", "copilot", "cursor"} {
 		if agents[i].Name != name {
 			t.Errorf("ordem: posição %d é %s, quero %s", i, agents[i].Name, name)
 		}
@@ -278,7 +281,7 @@ func TestPrint(t *testing.T) {
 		"Claude Code", "instalado em .claude/settings.json", "verificado com Claude Code 2.1.286",
 		"git push → deny (git-force-push)",
 		"Antigravity CLI", "detectado nesta máquina, não instalado aqui: iron init --agent=antigravity",
-		"NÃO PROTEGE", "Protegendo esta pasta: 2 de 5", "iron doctor --agent=NOME",
+		"NÃO PROTEGE", "Protegendo esta pasta: 3 de 6", "iron doctor --agent=NOME",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("a saída deveria conter %q:\n%s", want, text)
@@ -363,5 +366,43 @@ func TestCollectCopilotHookInSubfolderDoesNotProtect(t *testing.T) {
 	c := byName(Collect(in), "copilot")
 	if !c.Unprotected || !strings.Contains(strings.Join(c.Warnings, " "), "subpasta") {
 		t.Errorf("hook em subpasta não protege: %+v", c)
+	}
+}
+
+func TestCollectCursorFailClosedAndTimeout(t *testing.T) {
+	dir := t.TempDir()
+	in := input(t, dir)
+	if _, err := setup.InstallCursor(dir, fakeIron(t)); err != nil {
+		t.Fatal(err)
+	}
+	if c := byName(Collect(in), "cursor"); !c.Installed || c.Unprotected || len(c.Warnings) != 0 || c.Where != ".cursor/hooks.json" {
+		t.Fatalf("cursor saudável: %+v", c)
+	}
+
+	path := setup.CursorHooksPath(dir)
+	data, _ := os.ReadFile(path)
+	edit := func(old, new string) {
+		t.Helper()
+		if !strings.Contains(string(data), old) {
+			t.Fatalf("o arquivo não tem %q:\n%s", old, data)
+		}
+		if err := os.WriteFile(path, []byte(strings.Replace(string(data), old, new, 1)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// sem failClosed, falha e prazo estourado liberam o comando: NÃO PROTEGE.
+	edit(`"failClosed": true`, `"failClosed": false`)
+	if c := byName(Collect(in), "cursor"); !c.Unprotected || !strings.Contains(strings.Join(c.Warnings, " "), "failClosed") {
+		t.Errorf("sem failClosed deveria acusar: %+v", c)
+	}
+	// prazo curto: só aviso.
+	edit(`"timeout": 600`, `"timeout": 30`)
+	if c := byName(Collect(in), "cursor"); !strings.Contains(strings.Join(c.Warnings, " "), "prazo de 30 s") {
+		t.Errorf("prazo curto deveria avisar: %+v", c)
+	}
+	edit(`"timeout": 600`, `"x": 1`)
+	if c := byName(Collect(in), "cursor"); !strings.Contains(strings.Join(c.Warnings, " "), "60 s") {
+		t.Errorf("sem timeout deveria citar o padrão de 60 s: %+v", c)
 	}
 }

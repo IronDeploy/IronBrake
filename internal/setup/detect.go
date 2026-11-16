@@ -29,10 +29,11 @@ var agentMarkers = []agentMarker{
 	{hook.Antigravity.Name(), filepath.Join(".gemini", "antigravity-cli"), "agy"},
 	{hook.Codex.Name(), ".codex", "codex"},
 	{hook.Copilot.Name(), ".copilot", "copilot"},
+	{hook.Cursor.Name(), ".cursor", "cursor-agent"},
 }
 
 // DetectAgents devolve os agentes que parecem estar nesta máquina, na ordem
-// fixa claude, kiro, antigravity, codex, copilot. lookPath é o exec.LookPath (trocável
+// fixa claude, kiro, antigravity, codex, copilot, cursor. lookPath é o exec.LookPath (trocável
 // nos testes). O CODEX_HOME e o COPILOT_HOME, se definidos, também valem como pasta do agente.
 func DetectAgents(home string, lookPath func(string) (string, error)) []Detected {
 	var found []Detected

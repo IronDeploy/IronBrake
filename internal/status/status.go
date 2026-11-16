@@ -26,6 +26,7 @@ var Verified = map[string]string{
 	hook.Antigravity.Name(): "Antigravity CLI 1.2.14",
 	hook.Codex.Name():       "Codex CLI 0.159.3",
 	hook.Copilot.Name():     "Copilot CLI 1.0.112",
+	hook.Cursor.Name():      "Cursor 3.30.14 e cursor-agent 2026.11.13",
 }
 
 // Display é o nome para mostrar.
@@ -35,10 +36,11 @@ var Display = map[string]string{
 	hook.Antigravity.Name(): "Antigravity CLI",
 	hook.Codex.Name():       "Codex CLI",
 	hook.Copilot.Name():     "Copilot CLI",
+	hook.Cursor.Name():      "Cursor",
 }
 
 // Order é a ordem em que os agentes aparecem.
-var Order = []string{hook.Claude.Name(), hook.Kiro.Name(), hook.Antigravity.Name(), hook.Codex.Name(), hook.Copilot.Name()}
+var Order = []string{hook.Claude.Name(), hook.Kiro.Name(), hook.Antigravity.Name(), hook.Codex.Name(), hook.Copilot.Name(), hook.Cursor.Name()}
 
 // LastWindow é quanto o status olha para trás à procura da última decisão.
 const LastWindow = 30 * 24 * time.Hour
@@ -96,6 +98,8 @@ func Collect(in Input) []Agent {
 			probeCodex(in, &a)
 		case hook.Copilot.Name():
 			probeCopilot(in, &a)
+		case hook.Cursor.Name():
+			probeCursor(in, &a)
 		}
 		a.Last = lastDecision(entries, name)
 		agents = append(agents, a)
@@ -338,6 +342,38 @@ func probeCopilot(in Input, a *Agent) {
 		a.Warnings = append(a.Warnings, "não consegui ler "+in.CopilotConfig+": "+err.Error())
 	case !trust.FolderTrusted:
 		a.warn(`NÃO PROTEGE no copilot -p: a pasta não está em trustedFolders e o Copilot pula os hooks do projeto (abra o copilot aqui e escolha "Yes, and remember this folder for future sessions")`)
+	}
+}
+
+func probeCursor(in Input, a *Agent) {
+	hooks, err := setup.FindCursor(in.Dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return
+	case err != nil:
+		a.Warnings = append(a.Warnings, err.Error())
+		return
+	}
+	if len(hooks) == 0 {
+		return
+	}
+	a.Installed, a.Where = true, rel(in.Dir, hooks[0].File)
+
+	minimum := hook.Cursor.Capabilities().Budget().Deadline.Seconds() + 10
+	for _, h := range hooks {
+		// Sem failClosed, falha e prazo estourado LIBERAM o comando (provado).
+		if !h.FailClosed {
+			a.warn("NÃO PROTEGE em falha: o hook está sem failClosed, e se ele falhar ou estourar o prazo o Cursor executa o comando (rode iron init --agent=cursor)")
+		}
+		switch {
+		case h.Timeout == 0:
+			a.Warnings = append(a.Warnings, "sem timeout o padrão do Cursor é 60 s: ele corta o hook antes de a janela de confirmação terminar")
+		case h.Timeout < minimum:
+			a.Warnings = append(a.Warnings, fmt.Sprintf("prazo de %g s (mínimo %g s): o Cursor corta o hook antes de o Iron Brake responder", h.Timeout, minimum))
+		}
+		if w := missingBinary(h.Exe); w != "" {
+			a.warn(w)
+		}
 	}
 }
 

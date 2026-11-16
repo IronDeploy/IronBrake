@@ -84,7 +84,7 @@ func (c Capabilities) Budget() Budget {
 // DefaultAgent é o agente de "iron hook" sem --agent.
 const DefaultAgent = "claude"
 
-var agents = []Agent{Claude, Kiro, Antigravity, Codex, Copilot}
+var agents = []Agent{Claude, Kiro, Antigravity, Codex, Copilot, Cursor}
 
 // agentAliases são nomes alternativos aceitos em --agent.
 var agentAliases = map[string]string{"agy": "antigravity"}

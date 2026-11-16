@@ -1,0 +1,17 @@
+{
+  "conversation_id": "5f659ccc-92b5-4862-b9a1-429297781961",
+  "generation_id": "5f659ccc-92b5-4862-b9a1-429297781961",
+  "model": "default",
+  "command": "echo iron-cursor-ok",
+  "cwd": "",
+  "sandbox": false,
+  "tool_use_id": "194612aa-e8aa-408d-a847-ab7c4d8af082",
+  "session_id": "5f659ccc-92b5-4862-b9a1-429297781961",
+  "hook_event_name": "beforeShellExecution",
+  "cursor_version": "2026.11.13-eacade1",
+  "workspace_roots": [
+    "/home/dev/projeto"
+  ],
+  "user_email": "dev@example.com",
+  "transcript_path": "/home/dev/.cursor/projects/projeto/agent-transcripts/5f659ccc-92b5-4862-b9a1-429297781961/5f659ccc-92b5-4862-b9a1-429297781961.jsonl"
+}
