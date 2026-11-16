@@ -677,15 +677,23 @@ reconhecer o primeiro (cada comando passava duas vezes pelo Iron Brake).
 ## 19. Limites do Kiro CLI
 
 Verificado com o Kiro CLI **2.26.1** (macOS), em 2026-10-01, com o agente real e o `iron` real: bloqueio de
-`git push --force` e liberação de comando seguro no v2 (interativo e não interativo) e no v3 interativo;
+`git push --force` e liberação de comando seguro no v2 (interativo e não interativo) e no v3 interativo; e em 2026-11-16 com o **2.37.1**, o **3.3.0** (v3 não
+interativo) e o **Kiro IDE 1.4.178** (veja os dois primeiros itens abaixo);
 `ask` resolvido pela janela do Iron Brake (Executar → roda, Cancelar → bloqueia); prazo de 600 s
 respeitado; `agent: kiro` no log. Em **Linux** (Docker, usuário não root) foi verificado o binário `iron` real: `init`, `doctor`, hook com os
 dois payloads, `ask` sem janela virando bloqueio e corrente do log íntegra; o **Kiro de verdade não foi rodado em Linux**. Não verificado: Windows, outras versões do Kiro.
 
-- **v3 com `--no-interactive` não executa hooks** (o comando passa sem o Iron Brake, sem erro). Reproduzido
-  aqui para o `preToolUse`; é a issue [kirodotdev/Kiro#11281](https://github.com/kirodotdev/Kiro/issues/11281). O
-  `iron doctor --agent=kiro` só avisa; use `iron watch`, o portão da AWS e o CloudTrail onde couber.
-- **Kiro IDE: sem proteção** (o hook do IDE não recebe o comando; issues #7500 e #7375, não reconferidas).
+- **v3 com `--no-interactive`: corrigido no 2.37.1.** No 2.26.1 o hook não era executado nesse modo (o comando passava sem o Iron Brake, sem erro; issue
+  [kirodotdev/Kiro#11281](https://github.com/kirodotdev/Kiro/issues/11281), ainda aberta no upstream). Retestado em 2026-11-16 com o hook **só** no formato v3 (`.kiro/hooks`;
+  o motor v2, como controle, o ignora e gravou 0 decisões): no **2.37.1** (`--agent-engine v3`) e no **3.3.0** (v3 é o padrão) o hook roda, o `git push --force` é bloqueado
+  (remoto intacto, `deny` no log) e a janela do Iron Brake funciona (Executar roda, Cancelar bloqueia). Não se sabe em qual versão entre 2.26.1 e 2.37.1 começou a funcionar:
+  com o Kiro antigo, o `iron watch` acusa o comando sem decisão. O uso interativo do v3 não foi repetido na 3.3.0.
+- **Kiro IDE (1.4.178): o hook recebe o comando, depois de você confiar na pasta.** O IDE lê o mesmo `.kiro/hooks/*.json` do v3 (o `iron init --agent=kiro` já o grava). O
+  `preToolUse` chega com `tool_name: "execute_bash"` e `tool_input.command`, `cwd` e `session_id` (**provado** com um hook de captura; as issues antigas #7500 e #7375 foram
+  resolvidas no IDE 1.0.116). Verificado: force push bloqueado (remoto intacto, `deny` no log), janela com Cancelar (bloqueia) e com Executar depois de ~75 s (executa: o IDE
+  respeita o `timeout` de 600 s que o `init` grava; o padrão do IDE é 60 s). Em **Restricted Mode** o painel Agent Hooks mostra o hook como `(disabled)` e o IDE **nem cria o
+  terminal**: pergunta "Do you trust the authors of the files in this folder?" e, sem confiar, o agente responde que o terminal não inicia (remoto intacto, nenhuma decisão no
+  log), então não há comando sem o Iron Brake. O `iron watch` não lê as sessões do IDE.
 - **Só a saída 2 bloqueia.** JSON de resposta (`permissionDecision`) é ignorado, e exit 1 só avisa e libera.
   Estourar o prazo libera o comando; sem o campo de prazo o v2 libera após ~10 s, por isso o `iron init` grava
   `timeout_ms: 600000` (v2) e `timeout: 600` (v3) e o doctor falha se faltar.
@@ -700,7 +708,7 @@ dois payloads, `ask` sem janela virando bloqueio e corrente do log íntegra; o *
 - **Sem variável com a raiz do projeto:** vale o `cwd` do stdin. O `tool_input.cwd` do v3 é ignorado de
   propósito (quem o preenche é o modelo).
 - **Fora do escopo:** `--harden` (o Iron Shield usa regras de permissão do Claude) e a etiqueta da AWS. O `iron watch --agent=kiro` lê as
-  sessões v2 e v3 (limites na seção 23) e **acusa** o v3 não interativo.
+  sessões v2 e v3 (limites na seção 23) e **acusa** um comando sem decisão (como o do v3 não interativo do Kiro antigo).
 - **O modelo pode recusar antes do hook:** nos testes o Kiro às vezes se recusou a chamar a ferramenta; isso
   não é o Iron Brake.
 

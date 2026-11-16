@@ -126,8 +126,8 @@ func TestRunInitKiro(t *testing.T) {
 			t.Errorf("%s deveria existir e chamar o iron: %v", f, err)
 		}
 	}
-	if !strings.Contains(stdout.String(), "--no-interactive") {
-		t.Errorf("deveria avisar do modo não interativo do v3: %q", stdout.String())
+	if !strings.Contains(stdout.String(), "Restricted Mode") || strings.Contains(stdout.String(), "não protege") {
+		t.Errorf("deveria avisar da confiança do IDE, e não dizer que o v3 não protege: %q", stdout.String())
 	}
 	// o Claude não é tocado.
 	if _, err := os.Stat(filepath.Join(dir, ".claude")); err == nil {

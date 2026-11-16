@@ -84,7 +84,7 @@ etiqueta do agente na AWS está gravada.
 
 O hook decide antes do comando, mas não sabe se **deixou de rodar** (agente que o
 ignora, configuração errada, ou um modo do agente em que ele não carrega, como o
-Kiro v3 com `--no-interactive` ou um hook do Codex ainda não confiado). O
+`copilot -p` numa pasta não confiada, um hook do Codex ainda não confiado ou uma versão antiga do Kiro v3 com `--no-interactive`). O
 `iron watch` lê o transcript do agente e o log de auditoria e avisa quando um
 comando rodou **sem nenhuma decisão** do Iron Brake:
 
@@ -186,13 +186,12 @@ normal ou pede que você mesmo rode o comando).
 | Agente | Instalar na pasta do projeto | Estado |
 |---|---|---|
 | Claude Code | `iron init` | suportado |
-| Kiro CLI (engines v2 e v3, uso interativo e v2 não interativo) | `iron init --agent=kiro` e `iron doctor --agent=kiro` | suportado, verificado com o Kiro CLI 2.26.1 em 2026-10-01 |
+| Kiro CLI (engines v2 e v3), uso interativo e não interativo | `iron init --agent=kiro` e `iron doctor --agent=kiro` | suportado, verificado com o Kiro CLI 2.26.1 em 2026-10-01 (v2 interativo e não interativo, v3 interativo) e com o 2.37.1 e o 3.3.0 em 2026-11-16 (v3 não interativo, com a janela de confirmação) |
+| Kiro IDE | `iron init --agent=kiro` (o mesmo `.kiro/hooks`) e `iron doctor --agent=kiro` | suportado, verificado com o Kiro IDE 1.4.178 em 2026-11-16 (macOS), **depois de você confiar na pasta** (sem confiar, o IDE nem executa comandos) |
 | Antigravity CLI (`agy`), uso interativo e `-p` | `iron init --agent=antigravity` e `iron doctor --agent=antigravity` | suportado, verificado com o Antigravity CLI 1.2.14 em 2026-10-01 |
 | Codex CLI, chat e `codex exec` | `iron init --agent=codex` e `iron doctor --agent=codex` | suportado, verificado com o Codex CLI 0.159.3 em 2026-10-01, **depois de você confiar no hook** (veja abaixo) |
 | Copilot CLI, interativo e `-p` | `iron init --agent=copilot` e `iron doctor --agent=copilot` | suportado, verificado com o Copilot CLI 1.0.112 em 2026-11-15 (macOS), **depois de você confiar na pasta** (veja abaixo) |
 | Cursor (app e `cursor-agent`) | `iron init --agent=cursor` e `iron doctor --agent=cursor` | suportado, verificado com o Cursor 3.30.14 e o `cursor-agent` 2026.11.13 em 2026-11-16 (macOS) |
-| Kiro CLI v3 com `--no-interactive` | | **não suportado**: o Kiro não executa hooks nesse modo |
-| Kiro IDE | | **não suportado**: o hook do IDE não recebe o comando |
 | Gemini CLI | | **não suportado, por decisão**: o agente do Google que o Iron Brake cobre é o Antigravity CLI (linha acima). Ver a issue #23 |
 
 Os agentes se atualizam sozinhos, então a cada release eles são retestados de verdade (`scripts/verify-agent.sh`), e toda semana um workflow abre uma issue quando sai versão nova

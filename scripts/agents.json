@@ -6,7 +6,7 @@
   },
   "kiro": {
     "display": "Kiro CLI",
-    "verified": "2.26.1",
+    "verified": "3.3.0",
     "latest": { "brew": "kiro-cli" }
   },
   "antigravity": {

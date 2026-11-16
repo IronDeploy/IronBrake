@@ -31,8 +31,8 @@ func TestRunKiroAllOK(t *testing.T) {
 	results := RunKiro(dir, testVersion, testTimeout, kiroExtra(dir))
 
 	assertOK(t, results, true, true, true, true, true, true, true, true)
-	if !strings.Contains(results[6].Detail, "--no-interactive") {
-		t.Errorf("deveria avisar do v3 não interativo: %q", results[6].Detail)
+	if !strings.Contains(results[6].Detail, "Restricted Mode") || !strings.Contains(results[6].Detail, "--no-interactive") {
+		t.Errorf("deveria avisar da confiança do IDE e das versões antigas do v3: %q", results[6].Detail)
 	}
 }
 
