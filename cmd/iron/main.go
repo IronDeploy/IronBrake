@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -43,15 +45,16 @@ const usage = `uso: iron <subcomando>
 
   hook          roda como hook de pré-execução do agente (lê o evento pelo stdin; --agent=claude)
   init          instala o hook em .claude/settings.json da pasta atual e a etiqueta do agente na AWS; se achar outros agentes, pergunta
-  init --agent=a,b  instala nos agentes listados (claude, kiro, antigravity, codex, copilot); --agent=all instala em todos os detectados
+  init --agent=a,b  instala nos agentes listados (claude, kiro, antigravity, codex, copilot, cursor); --agent=all instala em todos os detectados
   init --agent=kiro  instala o hook do Kiro CLI (.kiro/agents e .kiro/hooks) na pasta atual
   init --agent=antigravity  instala o hook do Antigravity CLI (.agents/hooks.json) na pasta atual (apelido: agy)
   init --agent=codex  instala o hook do Codex CLI (.codex/hooks.json) na pasta atual; você ainda confia nele no Codex (/hooks)
   init --agent=copilot  instala o hook do Copilot CLI (.github/hooks/iron-brake.json) na pasta atual; você ainda confia na pasta no Copilot
+  init --agent=cursor  instala o hook do Cursor (.cursor/hooks.json, com failClosed) na pasta atual
   init --no-aws-tag  instala só o hook, sem gravar AWS_SDK_UA_APP_ID no env do agente
   init --harden grava também regras deny de leitura das credenciais (Iron Shield)
   status        mostra, por agente, o que está instalado nesta pasta, o que foi verificado e os avisos (não executa o hook)
-  doctor        verifica se o hook desta pasta está mesmo protegendo (--agent=kiro, antigravity, codex ou copilot)
+  doctor        verifica se o hook desta pasta está mesmo protegendo (--agent=kiro, antigravity, codex, copilot ou cursor)
   scan          raio-X das credenciais ao alcance do agente (Iron Shield, só leitura)
   scan --manage igual, mas interativo: setas navegam, enter oculta/mostra, esc/q sai
   shield status mostra quais credenciais estão travadas e quais não estão
@@ -78,6 +81,12 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if err != nil {
 			fmt.Fprintf(stderr, "iron: %v\n", err)
 			return 2
+		}
+		if agent.Name() == hook.Claude.Name() {
+			var done bool
+			if stdin, done = standDownForCursor(stdin); done {
+				return 0
+			}
 		}
 		budget := agent.Capabilities().Budget()
 		return runHook(stdin, stdout, stderr, hookDeps{
@@ -527,6 +536,73 @@ func runInitCopilot(dir, exePath string, opts initOptions, stdout, stderr io.Wri
 	return 0
 }
 
+// standDownForCursor trata o hook do Claude chamado PELO Cursor. O Cursor também
+// executa os hooks de .claude/settings.json, e manda a eles o payload dele (hook
+// "preToolUse" com cursor_version, tool_name "Shell"). Se a pasta já tem o hook do
+// Cursor, ele analisa o mesmo comando: sem ceder seriam duas janelas e duas linhas
+// no log (verificado com o cursor-agent). Devolve o stdin para o hook seguir (os
+// bytes lidos voltam) e true quando este deve sair em silêncio. Sem o hook do
+// Cursor na pasta, o hook do Claude continua analisando como antes.
+func standDownForCursor(stdin io.Reader) (io.Reader, bool) {
+	data, err := io.ReadAll(io.LimitReader(stdin, 1<<20))
+	restored := io.MultiReader(bytes.NewReader(data), stdin)
+	if err != nil {
+		return restored, false
+	}
+	var in struct {
+		Event          string   `json:"hook_event_name"`
+		CursorVersion  string   `json:"cursor_version"`
+		WorkspaceRoots []string `json:"workspace_roots"`
+	}
+	if json.Unmarshal(data, &in) != nil || in.Event != "preToolUse" || in.CursorVersion == "" {
+		return restored, false
+	}
+	dir := os.Getenv("CURSOR_PROJECT_DIR")
+	if len(in.WorkspaceRoots) > 0 {
+		dir = in.WorkspaceRoots[0]
+	}
+	if dir == "" {
+		return restored, false
+	}
+	if hooks, err := setup.FindCursor(dir); err == nil && len(hooks) > 0 {
+		return restored, true
+	}
+	return restored, false
+}
+
+// runInitCursor instala o hook do Cursor (.cursor/hooks.json) com failClosed:
+// sem ele, falha e prazo estourado deixam o comando executar. O app e o
+// cursor-agent leem a mesma configuração; o cursor-agent nem roda em pasta não
+// confiada, então não há o buraco de confiança do Copilot.
+func runInitCursor(dir, exePath string, opts initOptions, stdout, stderr io.Writer) int {
+	if opts.harden {
+		fmt.Fprintln(stderr, "iron: --harden só vale para o Claude Code (usa regras de permissão dele)")
+		return 2
+	}
+	state, err := setup.InstallCursor(dir, exePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "iron: %v\n", err)
+		return 1
+	}
+	path := setup.CursorHooksPath(dir)
+	switch state {
+	case setup.Installed:
+		fmt.Fprintf(stdout, "iron: hook do Cursor instalado em %s\n", path)
+	case setup.Updated:
+		fmt.Fprintf(stdout, "iron: hook do Cursor atualizado em %s (caminho, prazo, failClosed ou version estavam diferentes)\n", path)
+	default:
+		fmt.Fprintf(stdout, "iron: o hook do Cursor já estava em %s\n", path)
+	}
+	fmt.Fprintln(stdout, "iron: abra a pasta no Cursor (ou rode cursor-agent nela) e confira com: iron doctor --agent=cursor")
+	if opts.awsTag {
+		fmt.Fprintf(stdout, "iron: para o CloudTrail distinguir este agente, exporte %s=%s no terminal antes de abrir o cursor-agent (o Cursor não tem onde gravar isso; ele repassa o ambiente aos comandos).\n", awsTagVar, hook.Cursor.Capabilities().AppID)
+	}
+	if !setup.IsIronBinaryName(exePath) {
+		fmt.Fprintf(stderr, "iron: aviso: o programa se chama %q; o hook funciona, mas o iron doctor só o reconhece se o arquivo se chamar iron (ou iron.exe).\n", filepath.Base(exePath))
+	}
+	return 0
+}
+
 // reportCodexTrust diz o que falta para o Codex rodar o hook: confiar na pasta e
 // no hook (por hash). Olha o config.toml de verdade, então avisa também quando o
 // hook já estava instalado, e some quando tudo está confiado.
@@ -885,6 +961,8 @@ func doctorHere(args []string, stdout, stderr io.Writer) int {
 		return runDoctorCodex(dir, stdout)
 	case hook.Copilot.Name():
 		return runDoctorCopilot(dir, stdout)
+	case hook.Cursor.Name():
+		return runDoctorCursor(dir, stdout)
 	}
 	if _, err := os.Stat(setup.SettingsPath(dir)); err != nil {
 		if _, kiroErr := os.Stat(filepath.Join(dir, ".kiro")); kiroErr == nil {
@@ -914,6 +992,20 @@ func runDoctorCodex(dir string, stdout io.Writer) int {
 	home, _ := os.UserHomeDir()
 	extra.Coverage = watchCoverage(hook.Codex.Name(), dir, home, setup.CodexHooksPath(dir), extra.Log.Entries)
 	results := doctor.RunCodex(dir, codexConfigPath(), version, doctorTimeout, extra)
+	doctor.Print(stdout, results)
+	if !doctor.AllOK(results) {
+		return 1
+	}
+	return 0
+}
+
+func runDoctorCursor(dir string, stdout io.Writer) int {
+	extra := doctor.Extra{
+		Log:        audit.Log{Path: audit.DefaultPath()},
+		ConfigPath: toolpath.ConfigPath(),
+		ProjectDir: dir,
+	}
+	results := doctor.RunCursor(dir, version, doctorTimeout, extra)
 	doctor.Print(stdout, results)
 	if !doctor.AllOK(results) {
 		return 1

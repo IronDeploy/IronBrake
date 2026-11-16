@@ -1,0 +1,17 @@
+{
+  "conversation_id": "aada8690-ff44-472c-a78c-d195fb3d1555",
+  "generation_id": "955f7734-8aa0-41f7-a4b4-e5915019756d",
+  "model": "grok-4.7",
+  "command": "echo iron-cursor-ide",
+  "cwd": "",
+  "sandbox": true,
+  "tool_use_id": "8d3df20a-eb0f-4472-bcc7-072203ed27fa",
+  "session_id": "aada8690-ff44-472c-a78c-d195fb3d1555",
+  "hook_event_name": "beforeShellExecution",
+  "cursor_version": "3.30.14",
+  "workspace_roots": [
+    "/home/dev/projeto"
+  ],
+  "user_email": "dev@example.com",
+  "transcript_path": null
+}

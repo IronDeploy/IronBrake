@@ -145,7 +145,7 @@ func resolveInitAgents(requested []string, detected []setup.Detected, env initEn
 			}
 		}
 		if len(names) == 0 {
-			fmt.Fprintln(stderr, "iron: --agent=all não achou nenhum agente nesta máquina; use --agent=NOME (claude, kiro, antigravity, codex, copilot)")
+			fmt.Fprintln(stderr, "iron: --agent=all não achou nenhum agente nesta máquina; use --agent=NOME (claude, kiro, antigravity, codex, copilot, cursor)")
 			return nil, 2
 		}
 		return names, 0
@@ -210,6 +210,8 @@ func runInitFor(name, dir, exePath string, opts initOptions, stdout, stderr io.W
 		return runInitCodex(dir, exePath, opts, stdout, stderr)
 	case hook.Copilot.Name():
 		return runInitCopilot(dir, exePath, opts, stdout, stderr)
+	case hook.Cursor.Name():
+		return runInitCursor(dir, exePath, opts, stdout, stderr)
 	}
 	return runInit(dir, exePath, opts, stdout, stderr)
 }

@@ -1,7 +1,7 @@
 # Iron Brake
 
 O Iron Brake é um freio para agentes de IA no terminal. Ele roda como hook do
-agente (Claude Code, Kiro CLI, Antigravity CLI, Codex CLI ou Copilot CLI) e analisa cada comando **antes** de ele executar: libera o que é
+agente (Claude Code, Kiro CLI, Antigravity CLI, Codex CLI, Copilot CLI ou Cursor) e analisa cada comando **antes** de ele executar: libera o que é
 seguro, pede sua confirmação para o que é arriscado e bloqueia o que destrói.
 
 ## Instalação (macOS e Linux)
@@ -190,13 +190,14 @@ normal ou pede que você mesmo rode o comando).
 | Antigravity CLI (`agy`), uso interativo e `-p` | `iron init --agent=antigravity` e `iron doctor --agent=antigravity` | suportado, verificado com o Antigravity CLI 1.2.14 em 2026-10-01 |
 | Codex CLI, chat e `codex exec` | `iron init --agent=codex` e `iron doctor --agent=codex` | suportado, verificado com o Codex CLI 0.159.3 em 2026-10-01, **depois de você confiar no hook** (veja abaixo) |
 | Copilot CLI, interativo e `-p` | `iron init --agent=copilot` e `iron doctor --agent=copilot` | suportado, verificado com o Copilot CLI 1.0.112 em 2026-11-15 (macOS), **depois de você confiar na pasta** (veja abaixo) |
+| Cursor (app e `cursor-agent`) | `iron init --agent=cursor` e `iron doctor --agent=cursor` | suportado, verificado com o Cursor 3.30.14 e o `cursor-agent` 2026.11.13 em 2026-11-16 (macOS) |
 | Kiro CLI v3 com `--no-interactive` | | **não suportado**: o Kiro não executa hooks nesse modo |
 | Kiro IDE | | **não suportado**: o hook do IDE não recebe o comando |
 
 **Instalar em mais de um agente.** `iron init` sem opções instala o hook do Claude Code (como sempre) e, se achar outros agentes
-nesta máquina (a pasta `~/.kiro`, `~/.gemini/antigravity-cli`, `~/.codex` ou `~/.copilot`, ou o programa no PATH), **pergunta um por um**
+nesta máquina (a pasta `~/.kiro`, `~/.gemini/antigravity-cli`, `~/.codex`, `~/.copilot` ou `~/.cursor`, ou o programa no PATH), **pergunta um por um**
 quando está num terminal e, sem terminal, só mostra o comando. `iron init --agent=kiro,codex` instala nos agentes listados
-(`claude`, `kiro`, `antigravity` ou `agy`, `codex`, `copilot`) e `iron init --agent=all` em todos os detectados; o `--harden` vale só para o Claude.
+(`claude`, `kiro`, `antigravity` ou `agy`, `codex`, `copilot`, `cursor`) e `iron init --agent=all` em todos os detectados; o `--harden` vale só para o Claude.
 `iron status` mostra, por agente, se o hook está instalado nesta pasta, com que versão ele foi verificado, a última decisão
 registrada e os avisos (hook não confiado no Codex, pasta não confiada no Copilot, `hooks.json` inválido no Antigravity, programa que não existe...), sem executar
 o hook nem gravar no log. Para testar de verdade, rode `iron doctor --agent=NOME`.
@@ -220,6 +221,13 @@ o `init` recusa uma subpasta. O Copilot também só carrega os hooks do reposit�
 com um aviso e o comando passa sem o Iron Brake. Por isso, depois do `init`, abra o `copilot` na pasta e escolha **"Yes, and remember this folder for future
 sessions"**; o `iron doctor --agent=copilot` confere (`trustedFolders` do `~/.copilot/config.json`). O Copilot executa também o hook de
 `.claude/settings.json`: o `iron` reconhece essa chamada e não analisa o mesmo comando duas vezes. Limites na seção 24 do [doc/known-issues.md](doc/known-issues.md).
+
+No Cursor, o `iron init` grava `.cursor/hooks.json` (o resto do arquivo fica) com o hook `beforeShellExecution`, **`failClosed: true`** e o prazo de 600 s. O
+`failClosed` é o que importa: sem ele, se o hook falhar ou estourar o prazo, o Cursor **executa o comando**; o padrão do prazo é 60 s. O `iron doctor --agent=cursor` e o
+`iron status` reprovam um arquivo sem `failClosed` ou com prazo curto. O `cursor-agent` nem roda em pasta não confiada. O Cursor também executa o hook de
+`.claude/settings.json`: o `iron` reconhece essa chamada e não analisa o mesmo comando duas vezes (sem isso apareciam duas janelas). Para o hook do Cursor valer, ele
+precisa estar na pasta: um `git clean -fdx` ou `git stash -u` apaga um `.cursor/hooks.json` que não esteja no git, então versione o arquivo. Limites na seção 25 do
+[doc/known-issues.md](doc/known-issues.md).
 
 ## Iron Shield: o que o agente enxerga
 
@@ -252,7 +260,7 @@ caminho do agente. Detalhes e tabela completa em [doc/iron-shield.md](doc/iron-s
 
 **Escopo**
 
-- Só enxerga comandos de terminal (a ferramenta Bash do Claude Code; no Kiro, a ferramenta de shell; no Copilot, `bash` e `powershell`).
+- Só enxerga comandos de terminal (a ferramenta Bash do Claude Code; no Kiro, a ferramenta de shell; no Copilot, `bash` e `powershell`; no Cursor, o shell).
   Arquivos editados, chamadas de MCP e APIs não passam por ele.
 - Não substitui permissões mínimas. Se o agente usa uma credencial que pode
   apagar o banco de produção, o banco está em risco: a credencial do agente

@@ -787,8 +787,8 @@ verdade não foi rodado em Linux**. Não verificado: Windows, outras versões e 
 
 ## 22. Limites da detecção de agentes e do iron status
 
-- **Detecção** (`iron init`, `iron status`): a pasta do agente em `~/` (`.claude`, `.kiro`, `.gemini/antigravity-cli`, `.codex` ou o `CODEX_HOME`, `.copilot` ou o `COPILOT_HOME`) ou o programa
-  no PATH (`claude`, `kiro-cli`, `agy`, `codex`, `copilot`). É um indício de que o agente existe, não de que funciona; a pasta `~/.gemini` sozinha (Gemini CLI antigo) não conta como
+- **Detecção** (`iron init`, `iron status`): a pasta do agente em `~/` (`.claude`, `.kiro`, `.gemini/antigravity-cli`, `.codex` ou o `CODEX_HOME`, `.copilot` ou o `COPILOT_HOME`, `.cursor`) ou o programa
+  no PATH (`claude`, `kiro-cli`, `agy`, `codex`, `copilot`, `cursor-agent`). É um indício de que o agente existe, não de que funciona; a pasta `~/.gemini` sozinha (Gemini CLI antigo) não conta como
   Antigravity. Um agente que o Iron Brake não conhece não é detectado.
 - **`iron init` sem `--agent`** pergunta por cada outro agente detectado e ainda não instalado na pasta, **só num terminal de verdade** (`/dev/null` e pipe contam como sem
   terminal e só mostram o comando). Verificado num terminal real (tmux) e em Linux; a resposta em branco é "não". Se um instalador falhar, os outros continuam e o código
@@ -856,3 +856,33 @@ modelos (só um modelo foi usado).
   pasta da sessão mudar durante a conversa, vale a do `workspace.yaml`.
 - **Fora do escopo:** `--harden` (usa regras de permissão do Claude). Hooks de usuário (`~/.copilot/hooks`) e de política (`/etc/github-copilot/policy.d/`) não são
   instalados nem lidos pelo `doctor`; o Copilot do **GitHub cloud agent** (que só carrega `.github/hooks` do repositório clonado) não foi testado.
+
+## 25. Limites do Cursor
+
+Verificado com o **Cursor 3.30.14** (app, modelo Grok 4.7) e o **`cursor-agent` 2026.11.13**, em macOS, em 2026-11-16, com os agentes reais e o `iron` real. No
+`cursor-agent`: bloqueio de `git push --force`, liberação de `git status`, janela de confirmação (Executar roda o comando, Cancelar o bloqueia), `agent: cursor` no log e
+`iron doctor --agent=cursor` 9/9. No app: a janela de confirmação, com Executar e Cancelar, e o log. **Não verificado:** Windows, Linux, outras versões e outros
+modelos; o force push no app (o modelo recusou sozinho antes de chamar o hook); hooks de equipe e de empresa.
+
+- **`failClosed: true` é obrigatório.** Sem ele, exit 1, saída vazia e prazo estourado deixam o comando **executar** (**provado** no `cursor-agent` e no app); só JSON
+  inválido bloqueia sozinho. O `iron init` grava `failClosed: true` e `timeout: 600`; o `doctor` e o `status` reprovam um arquivo sem o `failClosed`. Com `failClosed`, o
+  Cursor também bloqueia o hook que estoura o prazo ("Hook script timed out").
+- **O `allow` tem de ser explícito.** Com `failClosed`, saída vazia é bloqueio ("returned no output"): o hook responde `{"permission":"allow"}`. O `allow` do hook **não**
+  passa por cima da aprovação do próprio Cursor: sem `--force`, o comando continua sendo recusado, como sem hook.
+- **O `ask` do hook não serve.** Com `--force`/`--yolo` o Cursor aprova o `ask` do hook e o comando executa (**provado**). O Iron Brake nunca o usa: pergunta na própria
+  janela e, sem janela, bloqueia (`permission: "deny"`).
+- **Prazo.** O padrão é **60 s** (hook de 75 s cortado aos 60 s); com `timeout` 120 o Cursor esperou o hook de 75 s. Valores maiores que 120 s não foram testados.
+- **Payload.** O `beforeShellExecution` traz `command`, `sandbox` e `workspace_roots`; o `cwd` vem **vazio** (no `cursor-agent` e no app), e o Iron Brake usa
+  `workspace_roots[0]`. No macOS o stdin não tem BOM; relatos de fórum dizem que no Windows tem (não verificado).
+- **Pasta não confiada.** O `cursor-agent -p` recusa rodar ("Workspace Trust Required", pede `--trust`, `--yolo` ou `-f`): não há o buraco silencioso do Copilot. A
+  confiança do app não foi mapeada.
+- **O Cursor executa também o hook de `.claude/settings.json`**, respeitando o `args`, mas com o payload dele (`preToolUse`, `tool_name: "Shell"`). Com os dois hooks, cada
+  comando abria **duas janelas** e gravava duas linhas (**provado**). Hoje o `iron hook` do Claude, ao receber esse payload (`cursor_version`) numa pasta que tem o hook do
+  Cursor, sai em silêncio. Sem o hook do Cursor, ele continua analisando o comando (parte das regras vale; o log mostra `agent: claude`). Um `iron` antigo duplica.
+- **O hook some se o arquivo não está no git.** `git clean -fdx` e `git stash -u` apagam um `.cursor/hooks.json` não versionado, e o comando seguinte roda sem proteção
+  (visto no teste; a janela de confirmação pediu antes, e o `git clean` foi aprovado). Versione `.cursor/hooks.json`.
+- **Só o shell é coberto** (`beforeShellExecution`). Edição de arquivos, MCP, leitura e subagentes não passam pela análise de comandos.
+- **Etiqueta da AWS:** o Cursor não tem onde gravá-la por projeto; ele repassa o ambiente aos comandos (verificado no `cursor-agent`: `AWS_SDK_UA_APP_ID=iron-cursor` chegou
+  ao shell). Para o app vale o ambiente em que ele foi aberto, e isso não foi verificado.
+- **Sem `iron watch` para o Cursor.** O transcript (`agent-transcripts/*.jsonl`) não traz hora nem identificador por chamada, então não dá para cruzar com o log.
+- **Fora do escopo:** `--harden` (usa regras de permissão do Claude). Hooks de usuário (`~/.cursor/hooks.json`), de equipe e de empresa também rodam e não são vistos pelo `doctor`.

@@ -13,13 +13,13 @@ func TestDetectAgentsByHomeFolders(t *testing.T) {
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("COPILOT_HOME", "")
 	home := t.TempDir()
-	for _, d := range []string{".claude", ".kiro", ".gemini/antigravity-cli", ".codex", ".copilot"} {
+	for _, d := range []string{".claude", ".kiro", ".gemini/antigravity-cli", ".codex", ".copilot", ".cursor"} {
 		if err := os.MkdirAll(filepath.Join(home, d), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	got := DetectAgents(home, noPath)
-	want := []string{"claude", "kiro", "antigravity", "codex", "copilot"}
+	want := []string{"claude", "kiro", "antigravity", "codex", "copilot", "cursor"}
 	if len(got) != len(want) {
 		t.Fatalf("esperava %v, obtive %+v", want, got)
 	}
@@ -43,7 +43,7 @@ func TestDetectAgentsGeminiFolderAloneIsNotAntigravity(t *testing.T) {
 
 func TestDetectAgentsByProgramOnPath(t *testing.T) {
 	look := func(name string) (string, error) {
-		if name == "agy" || name == "codex" || name == "copilot" {
+		if name == "agy" || name == "codex" || name == "copilot" || name == "cursor-agent" {
 			return "/opt/homebrew/bin/" + name, nil
 		}
 		return "", errors.New("não achei")
@@ -51,8 +51,9 @@ func TestDetectAgentsByProgramOnPath(t *testing.T) {
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("COPILOT_HOME", "")
 	got := DetectAgents(t.TempDir(), look)
-	if len(got) != 3 || got[0].Agent != "antigravity" || got[1].Agent != "codex" || got[2].Agent != "copilot" ||
-		got[0].Evidence != "agy em /opt/homebrew/bin/agy" || got[2].Evidence != "copilot em /opt/homebrew/bin/copilot" {
+	if len(got) != 4 || got[0].Agent != "antigravity" || got[1].Agent != "codex" || got[2].Agent != "copilot" || got[3].Agent != "cursor" ||
+		got[0].Evidence != "agy em /opt/homebrew/bin/agy" || got[2].Evidence != "copilot em /opt/homebrew/bin/copilot" ||
+		got[3].Evidence != "cursor-agent em /opt/homebrew/bin/cursor-agent" {
 		t.Errorf("deveria achar pelo PATH: %+v", got)
 	}
 }
