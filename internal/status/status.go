@@ -21,9 +21,9 @@ import (
 
 // Verified é com que versão cada agente foi verificado de verdade.
 var Verified = map[string]string{
-	hook.Claude.Name():      "Claude Code 2.1.286",
+	hook.Claude.Name():      "Claude Code 2.1.306",
 	hook.Kiro.Name():        "Kiro CLI 3.3.0 e Kiro IDE 1.4.178",
-	hook.Antigravity.Name(): "Antigravity CLI 1.2.14",
+	hook.Antigravity.Name(): "Antigravity CLI 1.5.9",
 	hook.Codex.Name():       "Codex CLI 0.159.3",
 	hook.Copilot.Name():     "Copilot CLI 1.0.112",
 	hook.Cursor.Name():      "Cursor 3.30.14 e cursor-agent 2026.11.13-eacade1",

@@ -714,6 +714,9 @@ dois payloads, `ask` sem janela virando bloqueio e corrente do log íntegra; o *
 
 ## 20. Limites do Antigravity CLI
 
+Retestado em 2026-11-16 com o **1.5.9** (macOS, `-p` com `--dangerously-skip-permissions`, pelo `scripts/verify-agent.sh`): `iron init` e `iron doctor` passam, o `git push --force` é bloqueado
+(remoto intacto, `deny` no log) e o `git status` é liberado, com `agent: antigravity` e uma só decisão por comando. O uso interativo e a janela de confirmação não foram repetidos na 1.5.9.
+
 Verificado com o Antigravity CLI **1.2.14** (macOS, `agy`), em 2026-10-01, com o agente real e o `iron` real: bloqueio de
 `git push --force` e liberação de `git status` no modo interativo e no `-p`, com e sem `--dangerously-skip-permissions`; `ask`
 pela janela do Iron Brake (Executar → o comando roda, Cancelar → bloqueia); prazo de 600 s respeitado; `iron watch --agent=antigravity`
