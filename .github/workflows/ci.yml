@@ -14,7 +14,10 @@ jobs:
         runs-on: ${{ matrix.os }}
         strategy:
             matrix:
-                os: [ubuntu-24.04, macos-14, windows-2022]
+                # o macOS 14 saiu do GitHub Actions em 2026-11-02 ("configuration
+                # 'macos-14-arm64-us-default' is not supported"). Os dois macOS
+                # arm64 em vigor: o anterior (15) e o atual (26).
+                os: [ubuntu-24.04, macos-15, macos-26, windows-2022]
         steps:
         - name: Checkout code
           uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
